@@ -93,6 +93,11 @@ class Poison_detect:
                 # if loss then (mean - elem), if accuracy (mean - elem)
                 dif = (mean - overall_mean)*self.ld
                 factor = (overall_mean+dif)/overall_mean
+                # FOR TEST IF ONE LABEL MIGHT IMPROVE
+                #if i == 3:
+                #    points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)*factor
+                #else:
+                #    points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)
                 points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)*factor
         return points
         

@@ -27,13 +27,13 @@ class FLClient(fl.client.NumPyClient):
                 #self.x_train = self.poisonRandomPixels(x_train = self.x_train)
                 #self.y_train = self.poisonSpecificLabel(y_train=self.y_train, part_of_labels=1.0,label=2,to_label='random')
                 #heterogen split below
-                #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 7, 7)
-                self.lazy_poisoning = True
+                self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 7, 7)
+                #self.lazy_poisoning = True
                 pass
         else:
             pass
             #heterogen split below
-            #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 2, 3)
+            self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 2, 3)
     
     def removeLabels(self,x_train,y_train,label1,label2):
         print(f"removing labels {label1} , {label2} !!!!!!")

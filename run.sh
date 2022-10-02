@@ -6,11 +6,11 @@ set -euo pipefail
 
 run_local() {
     echo "Starting server"
-    python3 runner.py --server --rounds 160 --epochs 2 &
+    python3 runner.py --server --rounds 200 --epochs 2 &
     sleep 5  # Sleep for 3s to give the server enough time to start
 
     num_clients=10
-    poison_list=""
+    poison_list="1 2 3"
     for i in `seq 0 $((num_clients-1))`; do
         echo "Starting client $i"
         if exists_in_list "$poison_list" " " $i; then

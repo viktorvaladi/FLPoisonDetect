@@ -46,7 +46,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.model = create_model()
         self.sum_threshold = 0
         self.evclient = FLServer.get_eval_fn2(self.model)
-        self.poison_detect = Poison_detect(1.5,1.5,1.5,0.3)
+        self.poison_detect = Poison_detect(1.5,1.5,1.5,6)
         self.run = 0
 
     def aggregate_fit(
@@ -93,7 +93,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             #np.savez(f"round-{server_round}-weights.npz", *aggregated_weights)
             
             #print accuracy and variance and poison/total visists for clients
-            if server_round % 16 == 0 and server_round != 0:
+            if server_round % 20 == 0 and server_round != 0:
                 self.model = create_model()
                 aggregated_weights = (ndarrays_to_parameters(self.model.get_weights()), {})
                 self.run = self.run+1
