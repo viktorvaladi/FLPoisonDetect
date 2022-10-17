@@ -46,8 +46,10 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.model = create_model()
         self.sum_threshold = 0
         self.evclient = FLServer.get_eval_fn2(self.model)
-        self.poison_detect = Poison_detect(1.5,1.5,1.5,6)
+        self.poison_detect = Poison_detect(2,3,1.5,3)
         self.run = 0
+        self.agg_history = {}
+        self.last_weights = []
 
     def aggregate_fit(
         self,
@@ -73,10 +75,17 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             # calculate variance for the current round
             mean = sum(varcounter) / len(varcounter)
             self.vars.append(sum((i - mean) ** 2 for i in varcounter) / len(varcounter))
-        part_agg = self.poison_detect.calculate_partitions(results)
+        part_agg = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
         print("PART AGGREGATION DICT HERE!!!!!!")
-        print(part_agg)
+        for elem in part_agg:
+            if elem in self.agg_history:
+                self.agg_history[elem].append(part_agg.get(elem))
+            else:
+                self.agg_history[elem] = [part_agg.get(elem)]
+
         aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, failures)
+        self.last_weights = aggregated_weights
+
         _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
         print('accuracy here! :)')
         self.acc_history[self.run].append(lastacc.get('accuracy'))
@@ -158,7 +167,11 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         for elem in totDict:
             if self.pointList.get(elem) == None:
                 self.pointList[elem] = next(self.geti)
-            print(f"individual label: {ind_label.get(elem)}")
+            print(f"client {self.pointList.get(elem)} is_poisoned = {self.mapPoisonClients.get(elem)} :")
+            print("agg_history :")
+            print(self.agg_history.get(elem))
+            print(f"mean: {np.mean(self.agg_history.get(elem))}")
+            #print(f"individual label: {ind_label.get(elem)}")
         print("aggregated indivudal label accuracy: ")
         print(agg_label)
 

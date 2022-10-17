@@ -16,12 +16,14 @@ np.set_printoptions(threshold=np.inf)
 
 (x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
 
-asd = [[0.25]]
-for elem in asd:
-    print(elem[-1])
-
-print(":)")
-
+model = create_model()
+print(model.get_weights()[1])
+print(len(model.get_weights()[1]))
+asd = model.get_weights()
+asd[1] = np.array([5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1])
+print(len(asd[1]))
+model.set_weights(asd)
+print(model.get_weights()[1])
 
 #x = np.array([0.7336,0.7476,0.7280,0.7466,0.7243,0.7339,0.7435,0.7560, 0.7336, 0.7479])
 #print(np.mean(x))

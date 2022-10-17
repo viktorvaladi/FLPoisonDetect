@@ -21,15 +21,12 @@ class Poison_detect:
         self.md_heterogenous = md_heterogenous
         self.ld = ld
     
-    def calculate_partitions(self,results):
+    def calculate_partitions(self,results, last_agg_w, round_nr):
         # part_agg will be between 0-1 how big part each client should take of aggregation
         part_agg = {}
-        label_acc_dict, nodes_acc, loss_dict, label_loss_dict = self.calculate_accs(results)
-        print("DICTS HERE!!!!!!")
-        print(loss_dict)
-        print(label_loss_dict)
+        label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results, last_agg_w, round_nr)
         points, overall_mean = self.get_points_overall(loss_dict, results)
-        points = self.get_points_label(label_loss_dict, results, overall_mean, points)
+        points = self.get_points_label(label_loss_dict, results, overall_mean, points, last_loss, last_label_loss, round_nr)
         #make sure no client has negative points
         for elem in points:
             points[elem] = max(0,points[elem])
@@ -66,7 +63,7 @@ class Poison_detect:
         #individual label points
         return points, mean
     
-    def get_points_label(self, label_acc_dict, results, overall_mean, points):
+    def get_points_label(self, label_acc_dict, results, overall_mean, points, last_loss, last_label_loss, round_nr):
         #individual label points
         for i in range(self.no_labels):
             #calculate mean for label i
@@ -88,29 +85,29 @@ class Poison_detect:
             mad_calc = mad_calc[:no_elems]
             mad = np.mean(mad_calc)
             slope = 10/(self.md_label*mad)
+
+            dif = (mean - overall_mean)
+            x = ((overall_mean+dif)/overall_mean)
+            factor = x**self.ld
             for k in range(len(all_for_score)):
                 #factor based on how far this label is from the mean
                 # if loss then (mean - elem), if accuracy (mean - elem)
-                dif = (mean - overall_mean)*self.ld
-                factor = (overall_mean+dif)/overall_mean
                 # FOR TEST IF ONE LABEL MIGHT IMPROVE
-                #if i == 3:
+                # if i == 3:
                 #    points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)*factor
-                #else:
+                # else:
                 #    points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)
-                points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)*factor
-        return points
-        
-        
-        # calculate mean absolute deviation for middle 80% of clients
-        
-
+                # mean = 120, overall_mean = 100
+                # (80 - 100)*10 = -200
+                # 200-200 / 100 = 2.2
+                #
+                points[results[k][0]] = points.get(results[k][0],0) + (max(1,factor)*slope*all_for_score[k]+10)
         return points
 
     #calculates accuracy for each client and return two dicts for label acc and overall acc.
     #calculates variance in data
     # TODO add heterogenity?
-    def calculate_accs(self, results):
+    def calculate_accs(self, results, last_weights, round_nr):
         label_acc_dict = {}
         nodes_acc = {}
         loss_dict = {}
@@ -121,7 +118,12 @@ class Poison_detect:
             nodes_acc[results[i][0]] = acc.get('accuracy')
             loss_dict[results[i][0]] = loss
             label_loss_dict[results[i][0]] = lab_loss
-        return label_acc_dict, nodes_acc, loss_dict, label_loss_dict
+        if round_nr > 2:
+            last_loss, last_acc, last_lab_acc, last_label_loss = self.evclient(parameters_to_ndarrays(last_weights[0]))
+        else:
+            last_loss = 0
+            last_label_loss = 0
+        return label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss
 
     #calculate accuracies an client
     # TODO add heterogenity?
@@ -146,7 +148,7 @@ class Poison_detect:
                 pred = np.argmax(preds[i])
                 true = np.argmax(y_test[i])
                 spec_label_all_count[true] = spec_label_all_count[true] +1
-                spec_label_loss_count[true] += -(math.log(preds[i][true]))
+                spec_label_loss_count[true] += -(math.log(max(preds[i][true],0.0001)))
                 if true == pred:
                     spec_label_correct_count[true] = spec_label_correct_count[true] +1
             spec_label_accuracy = []
