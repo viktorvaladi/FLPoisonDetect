@@ -90,17 +90,6 @@ class Poison_detect:
             x = ((overall_mean+dif)/overall_mean)
             factor = x**self.ld
             for k in range(len(all_for_score)):
-                #factor based on how far this label is from the mean
-                # if loss then (mean - elem), if accuracy (mean - elem)
-                # FOR TEST IF ONE LABEL MIGHT IMPROVE
-                # if i == 3:
-                #    points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)*factor
-                # else:
-                #    points[results[k][0]] = points.get(results[k][0],0) + (slope*all_for_score[k]+10)
-                # mean = 120, overall_mean = 100
-                # (80 - 100)*10 = -200
-                # 200-200 / 100 = 2.2
-                #
                 points[results[k][0]] = points.get(results[k][0],0) + (max(1,factor)*slope*all_for_score[k]+10)
         return points
 
@@ -156,5 +145,7 @@ class Poison_detect:
             for i in range(len(spec_label_all_count)):
                 spec_label_accuracy.append(spec_label_correct_count[i]/spec_label_all_count[i])
                 spec_label_loss.append(spec_label_loss_count[i]/spec_label_all_count[i])
-            return loss, {"accuracy": accuracy}, spec_label_accuracy, spec_label_loss
+            print('mean loss here!!')
+            print(np.mean(spec_label_loss))
+            return np.mean(spec_label_loss), {"accuracy": accuracy}, spec_label_accuracy, spec_label_loss
         return evaluate

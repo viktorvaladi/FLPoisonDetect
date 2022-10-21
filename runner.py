@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument("--client-index", type=int, default=0)
     parser.add_argument("--server-address", type=str, default='0.0.0.0')
     parser.add_argument("--is-poisoned", action="store_true")
-    parser.add_argument("--nr_of_split_per_round", type=int, default=2)
+    parser.add_argument("--nr_of_split_per_round", type=int, default=4)
     args = parser.parse_args()
 
     model_config_file = args.model_config or 'model_config.yml'

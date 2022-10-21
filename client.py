@@ -6,6 +6,8 @@ import argparse
 import flwr as fl
 import random
 from model import create_model
+from model_ascent import create_model_ascent
+from cinic10_ds import get_test_val_ds
 import numpy as np
 
 
@@ -20,7 +22,11 @@ class FLClient(fl.client.NumPyClient):
         self.train_count = len(x_train)
         self.test_count = len(x_test)
         self.model = create_model()
+        self.model_ascent = create_model_ascent()
         self.lazy_poisoning = False
+        self.pga_poisoning = False
+        self.pga_poisoning_split = False
+        self.epochs = 10
         if is_poisoned:
             if True:
                 #self.y_train = self.poisonRandomLabel(y_train = self.y_train, no_labels=3000)
@@ -29,6 +35,10 @@ class FLClient(fl.client.NumPyClient):
                 #heterogen split below
                 #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 7, 7)
                 #self.lazy_poisoning = True
+                self.pga_poisoning_split = True
+                self.pga_poisoning = True
+                self.pga_scaler = 0.05
+                #self.epochs = 30
                 pass
         else:
             #heterogen split below
@@ -102,19 +112,77 @@ class FLClient(fl.client.NumPyClient):
     
     def get_properties(self):
         return {"is_poisoned" : self.is_poisoned}
+    
+    def find_worst_labels(self, parameters):
+        spec_label_acc = self.ev_labels(parameters)
+        l1 = np.argmin(spec_label_acc)
+        spec_label_acc[l1] = 100
+        l2 = np.argmin(spec_label_acc)
+        spec_label_acc[l2] = 100
+        l3 = np.argmin(spec_label_acc)
+        spec_label_acc[l3] = 100
+        return l1, l2, l3
+    
+    def split_data(self, l1, l2, l3, x, y):
+        
+        pass
+    
+    def pga_poison(self,parameters, x, y):
+        self.model_ascent.set_weights(parameters)
+        last_weights = self.model_ascent.get_weights()
+        self.model_ascent.fit(x, y, epochs=self.epochs, batch_size=128, validation_split=0.1)
+        new_weights = self.model_ascent.get_weights()
+        for i in range(len(last_weights)):
+            scaled_norm = np.subtract(new_weights[i],last_weights[i])*self.pga_scaler
+            last_weights[i] = np.add(last_weights[i],scaled_norm)
+        return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
+    
+    def pga_poison_split(self,parameters, x, y):
+        l1, l2, l3 = self.find_worst_labels(parameters)
+        x_improve, y_improve, x_worsen, y_worsen = self.split_data(l1, l2, l3, x, y)
+        self.model_ascent.set_weights(parameters)
+        last_weights = self.model_ascent.get_weights()
+        self.model_ascent.fit(x, y, epochs=self.epochs, batch_size=128, validation_split=0.1)
+        new_weights = self.model_ascent.get_weights()
+        for i in range(len(last_weights)):
+            scaled_norm = np.subtract(new_weights[i],last_weights[i])*self.pga_scaler
+            last_weights[i] = np.add(last_weights[i],scaled_norm)
+        return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
 
     def fit(self, parameters, config):
         partition = config.get('current_round') % config.get('nr_of_split_per_round')
         part_size = len(self.x_train)/config.get('nr_of_split_per_round')
         x = self.x_train[int(partition*part_size) : int(((partition+1)*part_size)-1) ]
         y = self.y_train[ int(partition*part_size) : int(((partition+1)*part_size)-1) ]
+
+        if self.pga_poisoning:
+            return self.pga_poison(self,parameters, x, y)
+        if self.pga_poisoning_split:
+            return self.pga_poison_split(self,parameters, x, y)
+
         self.model.set_weights(parameters)
         if self.lazy_poisoning:
             return self.model.get_weights(), self.train_count, {"is_poisoned" : self.is_poisoned}
 
-        self.model.fit(x, y, epochs=10, batch_size=128, validation_split=0.1)
-
+        self.model.fit(x, y, epochs=self.epochs, batch_size=128, validation_split=0.1)
         return self.model.get_weights(), self.train_count, {"is_poisoned" : self.is_poisoned}
+
+    def ev_labels(self, parameters):
+        x_test, y_test = get_test_val_ds()
+        self.model.set_weights(parameters)
+        preds = self.model.predict(x_test)
+        spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
+        spec_label_all_count = [0.0 for i in range(len(y_test[0]))]
+        for i in range(len(preds)):
+            pred = np.argmax(preds[i])
+            true = np.argmax(y_test[i])
+            spec_label_all_count[true] = spec_label_all_count[true] +1
+            if true == pred:
+                spec_label_correct_count[true] = spec_label_correct_count[true] +1
+        spec_label_accuracy = []
+        for i in range(len(spec_label_all_count)):
+            spec_label_accuracy.append(spec_label_correct_count[i]/spec_label_all_count[i])
+        return spec_label_accuracy
 
     def evaluate(self, parameters, config):
         self.model.set_weights(parameters)

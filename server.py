@@ -102,7 +102,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             #np.savez(f"round-{server_round}-weights.npz", *aggregated_weights)
             
             #print accuracy and variance and poison/total visists for clients
-            if server_round % 20 == 0 and server_round != 0:
+            if server_round % 60 == 0 and server_round != 0:
                 self.model = create_model()
                 aggregated_weights = (ndarrays_to_parameters(self.model.get_weights()), {})
                 self.run = self.run+1
