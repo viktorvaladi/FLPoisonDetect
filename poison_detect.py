@@ -11,10 +11,11 @@ import math
 
 class Poison_detect:
     # md_factor determines by how much more we want to favor the stronger client updates
-    def __init__(self, md_overall = 1.5, md_label = 1.5, md_heterogenous = 1.5, ld = 4):
-        self.model = create_model()
-        self.evclient = Poison_detect.get_eval_fn(self.model)
-        _, y_test = get_test_val_ds()
+    def __init__(self, md_overall = 1.5, md_label = 1.5, md_heterogenous = 1.5, ld = 4, data = "cifar10"):
+        self.data = data
+        self.model = create_model(self.data)
+        self.evclient = Poison_detect.get_eval_fn(self.model, self.data)
+        _, y_test = get_test_val_ds(self.data)
         self.no_labels = len(y_test[0])
         self.md_overall = md_overall
         self.md_label = md_label
@@ -118,12 +119,12 @@ class Poison_detect:
     # TODO add heterogenity?
     # TODO add more metrics - loss
     @staticmethod
-    def get_eval_fn(model):
+    def get_eval_fn(model, data):
         """Return an evaluation function for server-side evaluation."""
 
-        x_test, y_test = get_test_val_ds()
-        x_test = x_test[0:2500]
-        y_test = y_test[0:2500]
+        x_test, y_test = get_test_val_ds(data)
+        x_test = x_test[0:int(len(x_test)/2)]
+        y_test = y_test[0:int(len(y_test)/2)]
 
         # The `evaluate` function will be called after every round
         def evaluate(weights: fl.common.NDArrays) -> Optional[Tuple[float, float]]:

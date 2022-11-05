@@ -6,17 +6,27 @@ set -euo pipefail
 
 run_local() {
     echo "Starting server"
-    python3 runner.py --server --rounds 60 --epochs 2 &
+    ds="emnist"
+    python3 runner.py --server --rounds 60 --epochs 2 --data=$ds &
     sleep 5  # Sleep for 3s to give the server enough time to start
 
     num_clients=10
     poison_list="1"
+    heterogeneity_list="1 2 3"
     for i in `seq 0 $((num_clients-1))`; do
         echo "Starting client $i"
         if exists_in_list "$poison_list" " " $i; then
-            python3 runner.py --client --total-clients=$num_clients --client-index $i --server-address 127.0.0.1 --is-poisoned &
+            if exists_in_list "$heterogeneity_list" " " $i; then
+                python3 runner.py --client --total-clients=$num_clients --client-index $i --server-address 127.0.0.1 --is-poisoned --is-noniid --data=$ds &
+            else
+                python3 runner.py --client --total-clients=$num_clients --client-index $i --server-address 127.0.0.1 --data=$ds &
+            fi
         else
-            python3 runner.py --client --total-clients=$num_clients --client-index $i --server-address 127.0.0.1 &
+            if exists_in_list "$heterogeneity_list" " " $i; then
+                python3 runner.py --client --total-clients=$num_clients --client-index $i --server-address 127.0.0.1 --is-noniid --data=$ds &
+            else
+                python3 runner.py --client --total-clients=$num_clients --client-index $i --server-address 127.0.0.1 --data=$ds &
+            fi
         fi
     done
 

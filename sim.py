@@ -1,9 +1,11 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
+import math
 
-from typing import Optional, Tuple, List
-import flwr as fl
-import numpy as np
+from model_ascent import create_model_ascent
+
+# Make TensorFlow logs less verbose
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 from typing import Callable, Dict, List, Optional, Tuple, Union
 from flwr.common.logger import log
 from logging import WARNING
@@ -21,202 +23,31 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
-from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
-from flwr.server.client_manager import ClientManager
+
 from flwr.server.client_proxy import ClientProxy
-from cinic10_ds import get_test_val_ds
-from model import create_model
-import argparse
 from poison_detect import Poison_detect
+from sim_client import FlwrClient
 
-class SaveModelStrategy(fl.server.strategy.FedAvg):
-    def __init__(self, data="cifar10", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.data = data
-        self.poison_counts = {}
-        self.total_counts = {}
-        self.deviation_sum = {}
-        self.acc_history = [[]]
-        self.agg_label_final = []
-        self.round = 0
-        self.vars = []
-        self.label_acc_history = []
-        self.geti = self.fun(1000)
-        self.pointList = {}
-        self.mapPoisonClients = {}
-        self.model = create_model(data)
-        self.sum_threshold = 0
-        self.evclient = FLServer.get_eval_fn2(self.model, self.data)
-        self.poison_detect = Poison_detect(2,3,1.5,3, self.data)
-        self.run = 0
-        self.agg_history = {}
-        self.last_weights = []
-    
-    def aggregate_fit(
-        self,
-        server_round: int,
-        results: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.FitRes]],
-        failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
-    ) -> Optional[fl.common.NDArrays]:
-        if len(results) > 0:
-            self.round = server_round
-            nodes_acc = {}
-            label_acc_dict = {}
-            varcounter = []
-            # evaluates all nodes accuracy and saves in nodes_acc as {nodeName : accuracy}
-            # also saves accuracy in a list to count variance
-            for i in range(len(results)):
-                _,acc,lab_acc = self.evclient(parameters_to_ndarrays(results[i][1].parameters))
-                label_acc_dict[results[i][0]] = lab_acc
-                nodes_acc[results[i][0]] = acc.get('accuracy')
-                varcounter.append(acc.get('accuracy'))
-                self.total_counts[results[i][0]] = self.total_counts.get(results[i][0],0)+1
-                if (self.mapPoisonClients.get(results[i][0]) is None):
-                    self.mapPoisonClients[results[i][0]] = results[i][1].metrics.get("is_poisoned")
-            # calculate variance for the current round
-            mean = sum(varcounter) / len(varcounter)
-            self.vars.append(sum((i - mean) ** 2 for i in varcounter) / len(varcounter))
-        part_agg = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
-        print("PART AGGREGATION DICT HERE!!!!!!")
-        for elem in part_agg:
-            if elem in self.agg_history:
-                self.agg_history[elem].append(part_agg.get(elem))
-            else:
-                self.agg_history[elem] = [part_agg.get(elem)]
+import flwr as fl
+import tensorflow as tf
+from model import create_model
+from cinic10_ds import get_train_ds, get_test_val_ds
+import numpy as np
+import random
 
-        aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, failures)
-        self.last_weights = aggregated_weights
+NUM_CLIENTS = 100
+DATA = "emnist"
+NUM_ROUNDS = 60
 
-        _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
-        print('accuracy here! :)')
-        self.acc_history[self.run].append(lastacc.get('accuracy'))
-        print(f'acc history: {self.acc_history}')
-        sum_run_last = 0
-        for elem in self.acc_history:
-            sum_run_last += elem[-1]
-        print('average final accuracy!:) :')
-        print(sum_run_last/len(self.acc_history))
-        np.savetxt('test.out', [sum_run_last/len(self.acc_history)], delimiter=',')
-        if aggregated_weights is not None:
-            # Save aggregated_weights
-            print(f"Saving round {server_round} aggregated_weights...")
-            #np.savez(f"round-{server_round}-weights.npz", *aggregated_weights)
-            
-            #print accuracy and variance and poison/total visists for clients
-            if server_round % 60 == 0 and server_round != 0:
-                self.model = create_model(self.data)
-                aggregated_weights = (ndarrays_to_parameters(self.model.get_weights()), {})
-                self.run = self.run+1
-                self.acc_history.append([])
-                self.agg_label_final.append(agg_label_acc)
-                agg_label_avg = None
-                for elem in self.agg_label_final:
-                    if agg_label_avg is None:
-                        agg_label_avg = elem
-                    else:
-                        for i in range(len(elem)):
-                            agg_label_avg[i] = agg_label_avg[i] + elem[i]
-                for i in range(len(agg_label_avg)):
-                    agg_label_avg[i] = agg_label_avg[i]/len(self.agg_label_final)
-                np.savetxt('agg_label_acc_avg.out', agg_label_avg, delimiter=',')
-                print('AGG LABEL AVERAGE ALL TURNS!!! :')
-                print(agg_label_avg)
-            self.totPoisCleanPrint(self.total_counts, label_acc_dict, agg_label_acc)
-        return aggregated_weights
-    
-    def aggregate_fit2(
-        self,
-        server_round: int,
-        results: List[Tuple[ClientProxy, FitRes]],
-        part_agg,
-        failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
-    ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
-        """Aggregate fit results using weighted average."""
-        if not results:
-            return None, {}
+def on_fit_config(server_round):
+    return {
+        'current_round': server_round,
+        'nr_of_split_per_round' : 1,
+        'epochs': 10,
+        'rounds': 60,
+    }
 
-        # Convert results
-        weights_results = [
-            (parameters_to_ndarrays(fit_res.parameters), part_agg.get(name))
-            for name, fit_res in results
-        ]
-        parameters_aggregated = ndarrays_to_parameters(self.aggregate2(weights_results))
-
-        # Aggregate custom metrics if aggregation fn was provided
-        metrics_aggregated = {}
-                    
-        return parameters_aggregated, metrics_aggregated
-    
-    def aggregate2(self, results: List[Tuple[NDArrays, int]]) -> NDArrays:
-        """Compute weighted average."""
-        # Calculate the total number of examples used during training
-        num_examples_total = sum([num_examples for _, num_examples in results])
-
-        # Create a list of weights, each multiplied by the related number of examples
-        weighted_weights = [
-            [layer * num_examples for layer in weights] for weights, num_examples in results
-        ]
-
-        # Compute average weights of each layer
-        weights_prime: NDArrays = [
-            reduce(np.add, layer_updates) / num_examples_total
-            for layer_updates in zip(*weighted_weights)
-        ]
-        return weights_prime
-    
-    def totPoisCleanPrint(self,totDict, ind_label, agg_label):
-        for elem in totDict:
-            if self.pointList.get(elem) == None:
-                self.pointList[elem] = next(self.geti)
-            print(f"client {self.pointList.get(elem)} is_poisoned = {self.mapPoisonClients.get(elem)} :")
-            print("agg_history :")
-            print(self.agg_history.get(elem))
-            print(f"mean: {np.mean(self.agg_history.get(elem))}")
-            #print(f"individual label: {ind_label.get(elem)}")
-        print("aggregated indivudal label accuracy: ")
-        print(agg_label)
-
-
-    def fun(self,x):
-        n = 0
-        while n < x:
-            yield n
-            n += 1
-
-
-class FLServer:
-    def __init__(self, rounds, epochs, nr_of_split_per_round, data):
-        self.rounds = rounds
-        self.epochs = epochs
-        self.nr_of_split_per_round = nr_of_split_per_round
-        self.data = data
-
-        model = create_model(data)
-        model.summary()
-
-        self.strategy = SaveModelStrategy(
-            data=self.data,
-            initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
-            on_evaluate_config_fn=FLServer.evaluate_config,
-            min_fit_clients=10,
-            min_available_clients=10,
-            fraction_fit=0.1,
-            fraction_evaluate=0.1,
-            evaluate_fn=FLServer.get_eval_fn(model, data),
-            on_fit_config_fn=self.on_fit_config,
-        )
-
-    def on_fit_config(self, server_round):
-        return {
-            'current_round': server_round,
-            'nr_of_split_per_round' : self.nr_of_split_per_round,
-            'epochs': self.epochs,
-            'rounds': self.rounds,
-        }
-
-    def start(self):
-        fl.server.start_server(config=fl.server.ServerConfig(num_rounds=self.rounds), strategy=self.strategy)
-
+class StaticFunctions():
     @staticmethod
     def get_eval_fn(model,data):
         """Return an evaluation function for server-side evaluation."""
@@ -239,7 +70,7 @@ class FLServer:
             return loss, {"accuracy": accuracy}
 
         return evaluate
-    
+
     @staticmethod
     def get_eval_fn2(model, data):
         """Return an evaluation function for server-side evaluation."""
@@ -284,3 +115,197 @@ class FLServer:
         """
         val_steps = 5 if server_round < 4 else 10
         return {"val_steps": val_steps}
+
+class SaveModelStrategy(fl.server.strategy.FedAvg):
+    def __init__(self, data, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.data = data
+        self.poison_counts = {}
+        self.total_counts = {}
+        self.deviation_sum = {}
+        self.acc_history = [[]]
+        self.agg_label_final = []
+        self.round = 0
+        self.label_acc_history = []
+        self.geti = self.fun(1000)
+        self.pointList = {}
+        self.mapPoisonClients = {}
+        self.model = create_model(data)
+        self.sum_threshold = 0
+        self.evclient = StaticFunctions.get_eval_fn2(self.model, self.data)
+        self.poison_detect = Poison_detect(2,3,1.5,3, self.data)
+        self.run = 0
+        self.agg_history = {}
+        self.last_weights = []
+    
+    def aggregate_fit(
+        self,
+        server_round: int,
+        results: List[Tuple[fl.server.client_proxy.ClientProxy, fl.common.FitRes]],
+        failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
+    ) -> Optional[fl.common.NDArrays]:
+        if len(results) > 0:
+            self.round = server_round
+            # evaluates all nodes accuracy and saves in nodes_acc as {nodeName : accuracy}
+            # also saves accuracy in a list to count variance
+            for i in range(len(results)):
+                self.total_counts[results[i][0]] = self.total_counts.get(results[i][0],0)+1
+                if (self.mapPoisonClients.get(results[i][0]) is None):
+                    self.mapPoisonClients[results[i][0]] = results[i][1].metrics.get("is_poisoned")
+            # calculate variance for the current round
+        part_agg = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
+        print("PART AGGREGATION DICT HERE!!!!!!")
+        for elem in part_agg:
+            if elem in self.agg_history:
+                self.agg_history[elem].append(part_agg.get(elem))
+            else:
+                self.agg_history[elem] = [part_agg.get(elem)]
+
+        aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, failures)
+        #aggregated_weights = super().aggregate_fit(server_round, results, failures)
+
+        self.last_weights = aggregated_weights
+
+        _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
+        print('accuracy here! :)')
+        self.acc_history[self.run].append(lastacc.get('accuracy'))
+        print(f'acc history: {self.acc_history}')
+        sum_run_last = 0
+        for elem in self.acc_history:
+            sum_run_last += elem[-1]
+        print('average final accuracy!:) :')
+        print(sum_run_last/len(self.acc_history))
+        np.savetxt('test.out', [sum_run_last/len(self.acc_history)], delimiter=',')
+        if aggregated_weights is not None:
+            # Save aggregated_weights
+            print(f"Saving round {server_round} aggregated_weights...")
+            #np.savez(f"round-{server_round}-weights.npz", *aggregated_weights)
+            
+            #print accuracy and variance and poison/total visists for clients
+            if server_round % 60 == 0 and server_round != 0:
+                self.model = create_model(self.data)
+                aggregated_weights = (ndarrays_to_parameters(self.model.get_weights()), {})
+                self.run = self.run+1
+                self.acc_history.append([])
+                self.agg_label_final.append(agg_label_acc)
+                agg_label_avg = None
+                for elem in self.agg_label_final:
+                    if agg_label_avg is None:
+                        agg_label_avg = elem
+                    else:
+                        for i in range(len(elem)):
+                            agg_label_avg[i] = agg_label_avg[i] + elem[i]
+                for i in range(len(agg_label_avg)):
+                    agg_label_avg[i] = agg_label_avg[i]/len(self.agg_label_final)
+                np.savetxt('agg_label_acc_avg.out', agg_label_avg, delimiter=',')
+                print('AGG LABEL AVERAGE ALL TURNS!!! :')
+                print(agg_label_avg)
+            self.totPoisCleanPrint(self.total_counts, agg_label_acc)
+        return aggregated_weights
+    
+    def aggregate_fit2(
+        self,
+        server_round: int,
+        results: List[Tuple[ClientProxy, FitRes]],
+        part_agg,
+        failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
+    ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
+        """Aggregate fit results using weighted average."""
+        if not results:
+            return None, {}
+
+        # Convert results
+        weights_results = [
+            (parameters_to_ndarrays(fit_res.parameters), part_agg.get(name))
+            for name, fit_res in results
+        ]
+        parameters_aggregated = ndarrays_to_parameters(self.aggregate2(weights_results))
+
+        # Aggregate custom metrics if aggregation fn was provided
+        metrics_aggregated = {}
+                    
+        return parameters_aggregated, metrics_aggregated
+    
+    def aggregate2(self, results: List[Tuple[NDArrays, int]]) -> NDArrays:
+        """Compute weighted average."""
+        # Calculate the total number of examples used during training
+        num_examples_total = sum([num_examples for _, num_examples in results])
+
+        # Create a list of weights, each multiplied by the related number of examples
+        weighted_weights = [
+            [layer * num_examples for layer in weights] for weights, num_examples in results
+        ]
+
+        # Compute average weights of each layer
+        weights_prime: NDArrays = [
+            reduce(np.add, layer_updates) / num_examples_total
+            for layer_updates in zip(*weighted_weights)
+        ]
+        return weights_prime
+    
+    def totPoisCleanPrint(self,totDict, agg_label):
+        for elem in totDict:
+            if self.pointList.get(elem) == None:
+                self.pointList[elem] = next(self.geti)
+            print(f"client {self.pointList.get(elem)} is_poisoned = {self.mapPoisonClients.get(elem)} :")
+            print("agg_history :")
+            print(self.agg_history.get(elem))
+            print(f"mean: {np.mean(self.agg_history.get(elem))}")
+            #print(f"individual label: {ind_label.get(elem)}")
+        print("aggregated indivudal label accuracy: ")
+        print(agg_label)
+
+
+    def fun(self,x):
+        n = 0
+        while n < x:
+            yield n
+            n += 1
+
+
+def client_fn(cid: str) -> fl.client.Client:
+    # Load model
+    model = create_model(DATA)
+    model_ascent = create_model(DATA)
+    
+    poisoned_list = [i for i in range(10)]
+    is_poisoned = False
+    if int(cid) in poisoned_list:
+        is_poisoned = True
+    
+    noniid_list = [i for i in range(30)]
+    is_noniid = False
+    if int(cid) in noniid_list:
+        is_noniid = True
+
+    # Load data partition (divide MNIST into NUM_CLIENTS distinct partitions)
+    x_train, y_train = get_train_ds(NUM_CLIENTS, int(cid), DATA)
+    x_test, y_test = get_test_val_ds(DATA)
+    x_test, y_test = x_test, y_test
+
+    # Create and return client
+    return FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid)
+
+def main() -> None:
+    # Start Flower simulation
+    model = create_model(DATA)
+    fl.simulation.start_simulation(
+        client_fn=client_fn,
+        num_clients=NUM_CLIENTS,
+        client_resources={"num_cpus": 4},
+        config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
+        strategy=SaveModelStrategy(
+            data=DATA,
+            initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
+            on_evaluate_config_fn=StaticFunctions.evaluate_config,
+            min_fit_clients=NUM_CLIENTS,
+            min_available_clients=NUM_CLIENTS,
+            fraction_fit=0.1,
+            fraction_evaluate=0.1,
+            evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
+            on_fit_config_fn=on_fit_config,
+        ),
+    )
+
+if __name__ == "__main__":
+    main()

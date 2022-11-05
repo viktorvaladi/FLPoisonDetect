@@ -7,15 +7,69 @@ from keras.models import Sequential
 from keras import datasets, layers, models
 from keras.utils import np_utils
 from cinic10_ds import get_train_ds, get_test_val_ds, batch_size
+import tensorflow_datasets as tfds
 import random
 import os
 from model import create_model
 from model_ascent import create_model_ascent
+import pandas as pd
+import matplotlib.pyplot as plt
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 np.set_printoptions(threshold=np.inf)
 
-(x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
+
+model = create_model("emnist")
+
+x_train, y_train = get_train_ds(100,1, "emnist")
+x_test, y_test = get_test_val_ds("emnist")
+
+model.fit(x_train, y_train, epochs=10, batch_size=128, validation_split=0.1)
+
+#(x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
+#ds = tfds.load('emnist', split='train', shuffle_files=True)
+#train = pd.read_csv('../archive/emnist-balanced-train.csv', header=None)
+#test = pd.read_csv('../archive/emnist-balanced-test.csv', header=None)
+
+#x_train = train.iloc[:, 1:]
+#y_train = train.iloc[:, 0]
+#x_test = test.iloc[:, 1:]
+#y_test = test.iloc[:, 0]
+
+#x_train = x_train.values
+#y_train = y_train.values
+#x_test = x_test.values
+#y_test = y_test.values
+#del train, test
+
+#def rotate(image):
+#    image = image.reshape([28, 28])
+#    image = np.fliplr(image)
+#    image = np.rot90(image)
+#    return image.reshape([28 * 28])
+#x_train = np.apply_along_axis(rotate, 1, x_train)
+#x_test = np.apply_along_axis(rotate, 1, x_test)
+
+#x_train = x_train.reshape(len(x_train), 28, 28)
+#x_test = x_test.reshape(len(x_test), 28, 28)
+#x_train = x_train.astype('float32')
+#x_test = x_test.astype('float32')
+#y_test = np_utils.to_categorical(y_test, 47)
+#y_train = np_utils.to_categorical(y_train, 47)
+
+# print(tf.version.VERSION)
+
+# x_test, y_test = get_test_val_ds("emnist")
+# x_test = x_test[int(len(x_test)/2):int(len(x_test)-1)]
+# y_test = y_test[int(len(y_test)/2):int(len(y_test)-1)]
+# print(x_test[0])
+# print(y_test[0])
+#model = create_model("emnist")
+#model.summary()
+#model.fit(x_train, y_train, epochs=1, batch_size=128, validation_split=0.1)
+
+#model.evaluate(x_test,y_test)
+
 #x_train, y_train = get_train_ds(10, 1)
 #x_test, y_test = get_test_val_ds()
 
