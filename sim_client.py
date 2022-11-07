@@ -7,7 +7,6 @@ from flwr.common.logger import log
 from logging import WARNING
 
 import flwr as fl
-from cinic10_ds import get_test_val_ds
 import numpy as np
 import random
 
@@ -186,7 +185,7 @@ class FlwrClient(fl.client.NumPyClient):
         return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
     
     def ev_labels(self, parameters):
-        x_test, y_test = get_test_val_ds(self.data)
+        x_test, y_test = self.x_val, self.y_val
         self.model.set_weights(parameters)
         preds = self.model.predict(x_test)
         spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]

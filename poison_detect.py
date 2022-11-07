@@ -8,15 +8,40 @@ from flwr.common import parameters_to_ndarrays
 from cinic10_ds import get_test_val_ds
 from model import create_model
 import math
+from ray.util.multiprocessing import Pool
+
+def multiprocess_evaluate(data, model, weights, x_test, y_test):
+    model.set_weights(weights)  # Update model with the latest parameters
+    loss, accuracy = model.evaluate(x_test,y_test)
+    preds = model.predict(x_test)
+    spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
+    spec_label_all_count = [0.0 for i in range(len(y_test[0]))]
+    spec_label_loss_count = [0.0 for i in range(len(y_test[0]))]
+    for i in range(len(preds)):
+        pred = np.argmax(preds[i])
+        true = np.argmax(y_test[i])
+        spec_label_all_count[true] = spec_label_all_count[true] +1
+        spec_label_loss_count[true] += -(math.log(max(preds[i][true],0.0001)))
+        if true == pred:
+            spec_label_correct_count[true] = spec_label_correct_count[true] +1
+    spec_label_accuracy = []
+    spec_label_loss = []
+    for i in range(len(spec_label_all_count)):
+        spec_label_accuracy.append(spec_label_correct_count[i]/spec_label_all_count[i])
+        spec_label_loss.append(spec_label_loss_count[i]/spec_label_all_count[i])
+    return np.mean(spec_label_loss), {"accuracy": accuracy}, spec_label_accuracy, spec_label_loss
 
 class Poison_detect:
     # md_factor determines by how much more we want to favor the stronger client updates
-    def __init__(self, md_overall = 1.5, md_label = 1.5, md_heterogenous = 1.5, ld = 4, data = "cifar10"):
+    def __init__(self, md_overall = 1.5, md_label = 1.5, md_heterogenous = 1.5, ld = 4, data="cifar10", num_cpus=8):
+        self.num_cpus = num_cpus
         self.data = data
         self.model = create_model(self.data)
         self.evclient = Poison_detect.get_eval_fn(self.model, self.data)
-        _, y_test = get_test_val_ds(self.data)
+        x_test, y_test = get_test_val_ds(self.data)
         self.no_labels = len(y_test[0])
+        self.x_test = x_test[0:int(len(x_test)/2)]
+        self.y_test = y_test[0:int(len(y_test)/2)]
         self.md_overall = md_overall
         self.md_label = md_label
         self.md_heterogenous = md_heterogenous
@@ -94,6 +119,10 @@ class Poison_detect:
                 points[results[k][0]] = points.get(results[k][0],0) + (max(1,factor)*slope*all_for_score[k]+10)
         return points
 
+    def par_results_ev(self, result):
+        loss, acc, lab_acc,lab_loss = multiprocess_evaluate(self.data, self.model, parameters_to_ndarrays(result[1].parameters), self.x_test, self.y_test)
+        return [result[0], loss, acc, lab_acc, lab_loss]
+
     #calculates accuracy for each client and return two dicts for label acc and overall acc.
     #calculates variance in data
     # TODO add heterogenity?
@@ -102,17 +131,16 @@ class Poison_detect:
         nodes_acc = {}
         loss_dict = {}
         label_loss_dict = {}
-        for i in range(len(results)):
-            loss,acc,lab_acc,lab_loss = self.evclient(parameters_to_ndarrays(results[i][1].parameters))
-            label_acc_dict[results[i][0]] = lab_acc
-            nodes_acc[results[i][0]] = acc.get('accuracy')
-            loss_dict[results[i][0]] = loss
-            label_loss_dict[results[i][0]] = lab_loss
-        if round_nr > 2:
-            last_loss, last_acc, last_lab_acc, last_label_loss = self.evclient(parameters_to_ndarrays(last_weights[0]))
-        else:
-            last_loss = 0
-            last_label_loss = 0
+        pool = Pool(ray_address="auto")
+        evaluated = pool.map(self.par_results_ev, results)
+        for elem in evaluated:
+            label_acc_dict[elem[0]] = elem[3]
+            nodes_acc[elem[0]] = elem[2].get('accuracy')
+            loss_dict[elem[0]] = elem[1]
+            label_loss_dict[elem[0]] = elem[4]
+        #redundant:)
+        last_loss = 0
+        last_label_loss = 0
         return label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss
 
     #calculate accuracies an client

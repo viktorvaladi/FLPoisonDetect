@@ -14,21 +14,66 @@ from model import create_model
 from model_ascent import create_model_ascent
 import pandas as pd
 import matplotlib.pyplot as plt
+import absl.logging
+absl.logging.set_verbosity(absl.logging.ERROR)
+from ray.util.multiprocessing import Pool
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 np.set_printoptions(threshold=np.inf)
 
+def multiprocess_evaluate(data, model, weights, x_test, y_test):
+    model.set_weights(weights)  # Update model with the latest parameters
+    loss, accuracy = model.evaluate(x_test,y_test)
+    return loss, accuracy
 
-model = create_model("emnist")
+class TesterClass:
+    def __init__(self, data):
+        self.model = create_model(data)
+        self.data = data
+        x_test, y_test = get_test_val_ds("emnist")
+        self.x_test = x_test[0:int(len(x_test)/2)]
+        self.y_test = y_test[0:int(len(y_test)/2)]
+    
+    def the_test(self):
+        weights = [self.model.get_weights() for i in range(10)]
+        res = self.multi(weights)
 
-x_train, y_train = get_train_ds(100,1, "emnist")
-x_test, y_test = get_test_val_ds("emnist")
+    def par_results_ev(self, weight):
+        loss, acc = multiprocess_evaluate(self.data, self.model, weight, self.x_test, self.y_test)
+        return [loss, acc]
 
-model.fit(x_train, y_train, epochs=10, batch_size=128, validation_split=0.1)
+    def multi(self, weights):
+        pool = Pool()
+        pool.map(self.par_results_ev, weights)
+
+if __name__ == '__main__':
+    m = TesterClass("emnist")
+    m.the_test()
+
+# def fun(x,y,n):
+#     z = x+y+n
+#     return z
+
+# class Test:
+#     def __init__(self):
+#         self.x = 5
+#         self.y = 5
+    
+#     def func(self, w):
+#         m = fun(self.x,self.y,w)
+#         return m
+
+#     def testet(self):
+#         with Pool(5) as p:
+#             print(p.map(self.func,[1,2,3]))
+
+# if __name__ == '__main__':    
+#     asd = Test()
+#     asd.testet()
 
 #(x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
 #ds = tfds.load('emnist', split='train', shuffle_files=True)
-#train = pd.read_csv('../archive/emnist-balanced-train.csv', header=None)
+#train = pd.read_csv('../emnist/emnist-bymerge-train.csv', header=None)
 #test = pd.read_csv('../archive/emnist-balanced-test.csv', header=None)
 
 #x_train = train.iloc[:, 1:]
@@ -41,6 +86,8 @@ model.fit(x_train, y_train, epochs=10, batch_size=128, validation_split=0.1)
 #x_test = x_test.values
 #y_test = y_test.values
 #del train, test
+
+#print(x_train[0])
 
 #def rotate(image):
 #    image = image.reshape([28, 28])

@@ -38,6 +38,7 @@ import random
 NUM_CLIENTS = 100
 DATA = "emnist"
 NUM_ROUNDS = 60
+NUM_CPUS = 255
 
 def on_fit_config(server_round):
     return {
@@ -133,7 +134,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.model = create_model(data)
         self.sum_threshold = 0
         self.evclient = StaticFunctions.get_eval_fn2(self.model, self.data)
-        self.poison_detect = Poison_detect(2,3,1.5,3, self.data)
+        self.poison_detect = Poison_detect(2,3,1.5,3, self.data, NUM_CPUS)
         self.run = 0
         self.agg_history = {}
         self.last_weights = []
@@ -292,7 +293,7 @@ def main() -> None:
     fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=NUM_CLIENTS,
-        client_resources={"num_cpus": 4},
+        client_resources={"num_cpus": 4, "num_gpus": 0.02},
         config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
         strategy=SaveModelStrategy(
             data=DATA,
@@ -301,7 +302,7 @@ def main() -> None:
             min_fit_clients=NUM_CLIENTS,
             min_available_clients=NUM_CLIENTS,
             fraction_fit=0.1,
-            fraction_evaluate=0.1,
+            fraction_evaluate=0.0,
             evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
             on_fit_config_fn=on_fit_config,
         ),

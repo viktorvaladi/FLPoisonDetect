@@ -84,5 +84,4 @@ def get_test_val_ds(data):
     
     x_test = x_test.astype('float32')
     y_test = np_utils.to_categorical(y_test, 47)
-    print(len(x_test))
     return x_test, y_test
