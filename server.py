@@ -76,7 +76,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             # calculate variance for the current round
             mean = sum(varcounter) / len(varcounter)
             self.vars.append(sum((i - mean) ** 2 for i in varcounter) / len(varcounter))
-        part_agg = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
+        part_agg, weights_to_add = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
         print("PART AGGREGATION DICT HERE!!!!!!")
         for elem in part_agg:
             if elem in self.agg_history:

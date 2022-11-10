@@ -35,10 +35,13 @@ from cinic10_ds import get_train_ds, get_test_val_ds
 import numpy as np
 import random
 
-NUM_CLIENTS = 100
-DATA = "emnist"
+NUM_CLIENTS = 40
+DATA = "cifar10"
 NUM_ROUNDS = 60
 NUM_CPUS = 255
+NUM_CLIENTS_PICK = 10
+NEWOLD = "new"
+
 
 def on_fit_config(server_round):
     return {
@@ -118,9 +121,10 @@ class StaticFunctions():
         return {"val_steps": val_steps}
 
 class SaveModelStrategy(fl.server.strategy.FedAvg):
-    def __init__(self, data, *args, **kwargs):
+    def __init__(self, data, newold, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.data = data
+        self.newold = newold
         self.poison_counts = {}
         self.total_counts = {}
         self.deviation_sum = {}
@@ -134,10 +138,10 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.model = create_model(data)
         self.sum_threshold = 0
         self.evclient = StaticFunctions.get_eval_fn2(self.model, self.data)
-        self.poison_detect = Poison_detect(2,3,1.5,3, self.data, NUM_CPUS)
+        self.poison_detect = Poison_detect(2,3,1.5,3, self.data, fraction_boost_iid=0.2, newold=self.newold)
         self.run = 0
         self.agg_history = {}
-        self.last_weights = []
+        self.last_weights = self.model.get_weights()
     
     def aggregate_fit(
         self,
@@ -154,7 +158,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
                 if (self.mapPoisonClients.get(results[i][0]) is None):
                     self.mapPoisonClients[results[i][0]] = results[i][1].metrics.get("is_poisoned")
             # calculate variance for the current round
-        part_agg = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
+        part_agg, weights_to_add = self.poison_detect.calculate_partitions(results, self.last_weights, server_round)
         print("PART AGGREGATION DICT HERE!!!!!!")
         for elem in part_agg:
             if elem in self.agg_history:
@@ -162,10 +166,10 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             else:
                 self.agg_history[elem] = [part_agg.get(elem)]
 
-        aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, failures)
+        aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, weights_to_add, failures)
         #aggregated_weights = super().aggregate_fit(server_round, results, failures)
 
-        self.last_weights = aggregated_weights
+        self.last_weights = parameters_to_ndarrays(aggregated_weights[0])
 
         _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
         print('accuracy here! :)')
@@ -209,6 +213,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         server_round: int,
         results: List[Tuple[ClientProxy, FitRes]],
         part_agg,
+        weights_to_add,
         failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
         """Aggregate fit results using weighted average."""
@@ -220,7 +225,13 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             (parameters_to_ndarrays(fit_res.parameters), part_agg.get(name))
             for name, fit_res in results
         ]
-        parameters_aggregated = ndarrays_to_parameters(self.aggregate2(weights_results))
+        aggregated = self.aggregate2(weights_results)
+        
+        for i in range(len(aggregated)):
+            for elem in weights_to_add:
+                aggregated[i] = np.add(aggregated[i], elem[i])
+            
+        parameters_aggregated = ndarrays_to_parameters(aggregated)
 
         # Aggregate custom metrics if aggregation fn was provided
         metrics_aggregated = {}
@@ -274,7 +285,7 @@ def client_fn(cid: str) -> fl.client.Client:
     if int(cid) in poisoned_list:
         is_poisoned = True
     
-    noniid_list = [i for i in range(30)]
+    noniid_list = [i for i in range(12)]
     is_noniid = False
     if int(cid) in noniid_list:
         is_noniid = True
@@ -293,13 +304,15 @@ def main() -> None:
     fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=NUM_CLIENTS,
-        client_resources={"num_cpus": 4, "num_gpus": 0.02},
+        client_resources={"num_cpus": 2, "num_gpus": 0.01},
         config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
+        keep_initialised=True,
         strategy=SaveModelStrategy(
             data=DATA,
+            newold = NEWOLD,
             initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
             on_evaluate_config_fn=StaticFunctions.evaluate_config,
-            min_fit_clients=NUM_CLIENTS,
+            min_fit_clients=NUM_CLIENTS_PICK,
             min_available_clients=NUM_CLIENTS,
             fraction_fit=0.1,
             fraction_evaluate=0.0,

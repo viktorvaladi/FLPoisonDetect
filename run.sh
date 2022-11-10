@@ -6,7 +6,7 @@ set -euo pipefail
 
 run_local() {
     echo "Starting server"
-    ds="emnist"
+    ds="cifar10"
     python3 runner.py --server --rounds 60 --epochs 2 --data=$ds &
     sleep 5  # Sleep for 3s to give the server enough time to start
 

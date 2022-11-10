@@ -21,34 +21,46 @@ from ray.util.multiprocessing import Pool
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 np.set_printoptions(threshold=np.inf)
 
-def multiprocess_evaluate(data, model, weights, x_test, y_test):
-    model.set_weights(weights)  # Update model with the latest parameters
-    loss, accuracy = model.evaluate(x_test,y_test)
-    return loss, accuracy
+# model = create_model("emnist")
+# x = model.get_weights()
+# x = np.array([[2,1],[1,-3]])
+# w = np.unravel_index(abs(x).argmax(), x.shape)
+# print(x[w])
 
-class TesterClass:
-    def __init__(self, data):
-        self.model = create_model(data)
-        self.data = data
-        x_test, y_test = get_test_val_ds("emnist")
-        self.x_test = x_test[0:int(len(x_test)/2)]
-        self.y_test = y_test[0:int(len(y_test)/2)]
-    
-    def the_test(self):
-        weights = [self.model.get_weights() for i in range(10)]
-        res = self.multi(weights)
+m = create_model("cifar10")
+x=m.get_weights()
 
-    def par_results_ev(self, weight):
-        loss, acc = multiprocess_evaluate(self.data, self.model, weight, self.x_test, self.y_test)
-        return [loss, acc]
+print(np.sum([np.prod(list(v.shape)) for v in x]))
 
-    def multi(self, weights):
-        pool = Pool()
-        pool.map(self.par_results_ev, weights)
+#print(np.sum([np.prod(list(v.shape)) for v in x]))
 
-if __name__ == '__main__':
-    m = TesterClass("emnist")
-    m.the_test()
+# y = model.get_weights()
+
+# w = fl.common.ndarrays_to_parameters(x)
+# print(type(w))
+# z = fl.common.parameters_to_ndarrays(w)
+# print(type(z))
+# x = np.array([[1,1],[1,1]])
+# x = x/2
+# print(x)
+# print(x[0])
+# for i in range(len(x)):
+#     z.append(np.subtract(x[i],y[i]))
+
+#print(np.unravel_index(x[0].argmax(), x[0].shape))
+# i = np.unravel_index(x[0].argmax(), x[0].shape)
+# print(x[0][i])
+# x[0][i] = 0
+# print(np.unravel_index(x[0].argmax(), x[0].shape))
+
+#x[0][i] = -10
+#print(x[0][i])
+#print(np.argmax(x[0]))
+
+
+# if __name__ == '__main__':
+#     m = TesterClass("emnist")
+#     m.the_test()
 
 # def fun(x,y,n):
 #     z = x+y+n
