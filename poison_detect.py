@@ -49,6 +49,11 @@ class Poison_detect:
         self.ld = ld
     
     def calculate_partitions(self,results, last_agg_w, round_nr):
+        if self.newold == "fedprox" or self.newold == "fedavg":
+            asd = {}
+            for elem in results:
+                asd[elem[0]] = 0
+            return asd, []
         # part_agg will be between 0-1 how big part each client should take of aggregation
         label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results, last_agg_w, round_nr)
         points = {}
@@ -69,13 +74,16 @@ class Poison_detect:
         no_weights = np.sum([np.prod(list(v.shape)) for v in last_weights])*self.fraction_boost_iid
         norms_list = []
         empty_weights = self.get_empty_weights()
-        weights_to_remove = empty_weights.copy()
+        weights_to_remove_prep = copy.deepcopy(empty_weights)
+        weights_to_remove = []
+        for i in range(len(weights_to_remove_prep)):
+            weights_to_remove.append(np.add(1, weights_to_remove_prep[i]))
         for elem in parts:
             if parts[elem] > 0:
                 no_weights_elem = int(no_weights * parts[elem])
                 print(no_weights)
                 print(no_weights_elem)
-                weights_to_add = empty_weights.copy()
+                weights_to_add = copy.deepcopy(empty_weights)
                 dif_norms = []
                 for i in range(len(norms_dict[elem])):
                     dif_norms.append(np.subtract(norms_dict[elem][i],avg_norms[i]))
@@ -90,17 +98,37 @@ class Poison_detect:
                         index_maxes.append(index_max)
                     index_list_max = np.argmax(list_maxes)
                     dif_norms[index_list_max][index_maxes[index_list_max]] = 0
-                    if weights_to_remove[index_list_max][index_maxes[index_list_max]] == 0:
-                        weights_to_remove[index_list_max][index_maxes[index_list_max]] = 1-parts[elem]
-                    else:
-                        weights_to_remove[index_list_max][index_maxes[index_list_max]] = weights_to_remove[index_list_max][index_maxes[index_list_max]] - parts[elem]
+                    weights_to_remove[index_list_max][index_maxes[index_list_max]] = weights_to_remove[index_list_max][index_maxes[index_list_max]] - parts[elem]
+                    #test
+                    if weights_to_remove[index_list_max][index_maxes[index_list_max]] < 0:
+                        print("wtf is happening???")
                     weights_to_add[index_list_max][index_maxes[index_list_max]] = parts[elem]*norms_dict[elem][index_list_max][index_maxes[index_list_max]]
                     no_weights_elem = no_weights_elem-1
                 norms_list.append(weights_to_add)
         scaled_weights_to_remove = []
         for i in range(len(weights_to_remove)):
-            scaled_weights_to_remove.append(np.multiply(weights_to_remove[i], avg_norms[i]))
+            scaled_weights_to_remove.append((-1)*np.multiply(np.subtract(1,weights_to_remove[i]), avg_norms[i]))
         norms_list.append(scaled_weights_to_remove)
+        #test
+        idx = np.unravel_index(abs(scaled_weights_to_remove[0]).argmax(), scaled_weights_to_remove[0].shape)
+        print("norms we add on this:")
+        for elem in norms_list:
+            print(elem[0][idx])
+        print("last weight this:")
+        print(last_weights[0][idx])
+        print("new weights this:")
+        for elem in results:
+            print(parameters_to_ndarrays(elem[1].parameters)[0][idx])
+        print("norms this: ")
+        for elem in norms_dict:
+            print(norms_dict[elem][0][idx])
+        print("norms times parts this: ")
+        for elem in parts:
+            print(norms_dict[elem][0][idx]*parts[elem])
+        print("avg norms this: ")
+        print(avg_norms[0][idx])
+        print("scaler of avg norms this")
+        print(weights_to_remove[0][idx])
         return norms_list
     
     def get_empty_weights(self):
@@ -124,10 +152,11 @@ class Poison_detect:
             norm = self.get_norms(parameters_to_ndarrays(elem[1].parameters),last_weights)
             norms_dict[elem[0]] = norm
             norms_list.append(norm)
-        norms_avg = norms_list[0]
-        for i in range(len(norms_list[0])):
-            for j in range(1, len(norms_list)):
-                norms_avg[i] = np.add(norms_avg[i],norms_list[j][i])
+        norms_avg = copy.deepcopy(norms_list[0])
+        for w_indx in range(len(norms_list[0])):
+            for c_indx in range(1, len(norms_list)):
+                norms_avg[w_indx] = np.add(norms_avg[w_indx] , norms_list[c_indx][w_indx])
+
         
         for i in range(len(norms_avg)):
             norms_avg[i] = norms_avg[i]/len(norms_list)
@@ -174,7 +203,7 @@ class Poison_detect:
             x = ((overall_mean+dif)/overall_mean)
             factor = x**self.ld
             for k in range(len(all_for_score)):
-                points[results[k][0]] = points.get(results[k][0],0) + factor*slope*all_for_score[k]
+                points[results[k][0]] = points.get(results[k][0],0) + (factor*slope*all_for_score[k]+10)
         return points
 
     def get_points_overall(self, nodes_acc, results, points = {}):

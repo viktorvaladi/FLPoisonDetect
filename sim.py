@@ -40,7 +40,7 @@ DATA = "cifar10"
 NUM_ROUNDS = 60
 NUM_CPUS = 255
 NUM_CLIENTS_PICK = 10
-NEWOLD = "new"
+NEWOLD = "fedavg"
 
 
 def on_fit_config(server_round):
@@ -165,9 +165,11 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
                 self.agg_history[elem].append(part_agg.get(elem))
             else:
                 self.agg_history[elem] = [part_agg.get(elem)]
-
-        aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, weights_to_add, failures)
-        #aggregated_weights = super().aggregate_fit(server_round, results, failures)
+            
+        if self.newold == "new" or self.newold == "old":
+            aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, weights_to_add, failures)
+        if self.newold == "fedprox" or self.newold == "fedavg":
+            aggregated_weights = super().aggregate_fit(server_round, results, failures)
 
         self.last_weights = parameters_to_ndarrays(aggregated_weights[0])
 
@@ -226,10 +228,10 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             for name, fit_res in results
         ]
         aggregated = self.aggregate2(weights_results)
-        
-        for i in range(len(aggregated)):
-            for elem in weights_to_add:
-                aggregated[i] = np.add(aggregated[i], elem[i])
+        if self.newold == "new":
+            for i in range(len(aggregated)):
+                for elem in weights_to_add:
+                    aggregated[i] = np.add(aggregated[i], elem[i])
             
         parameters_aggregated = ndarrays_to_parameters(aggregated)
 
@@ -280,7 +282,7 @@ def client_fn(cid: str) -> fl.client.Client:
     model = create_model(DATA)
     model_ascent = create_model(DATA)
     
-    poisoned_list = [i for i in range(10)]
+    poisoned_list = [i for i in range(12)]
     is_poisoned = False
     if int(cid) in poisoned_list:
         is_poisoned = True
@@ -296,7 +298,7 @@ def client_fn(cid: str) -> fl.client.Client:
     x_test, y_test = x_test, y_test
 
     # Create and return client
-    return FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid)
+    return FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid, NEWOLD)
 
 def main() -> None:
     # Start Flower simulation
@@ -304,7 +306,7 @@ def main() -> None:
     fl.simulation.start_simulation(
         client_fn=client_fn,
         num_clients=NUM_CLIENTS,
-        client_resources={"num_cpus": 2, "num_gpus": 0.01},
+        client_resources={"num_cpus": 1},#, "num_gpus": 0.01},
         config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
         keep_initialised=True,
         strategy=SaveModelStrategy(

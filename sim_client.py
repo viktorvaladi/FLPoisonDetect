@@ -1,5 +1,5 @@
 import os
-
+import tensorflow as tf
 # Make TensorFlow logs less verbose
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -9,10 +9,16 @@ from logging import WARNING
 import flwr as fl
 import numpy as np
 import random
+from flwr.common import parameters_to_ndarrays
+import copy
+from fedprox import FedProx
+
+FEDPROX = True
 
 class FlwrClient(fl.client.NumPyClient):
-    def __init__(self, model, model_ascent, x_train, y_train, x_val, y_val, is_poisoned, is_noniid) -> None:
+    def __init__(self, model, model_ascent, x_train, y_train, x_val, y_val, is_poisoned, is_noniid, newold) -> None:
         super().__init__()
+        self.newold = newold
         self.model = model
         self.model_ascent = model_ascent
         self.x_train, self.y_train = x_train, y_train
@@ -29,7 +35,7 @@ class FlwrClient(fl.client.NumPyClient):
             #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 7, 7)
             pass
         else:
-            self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 4, 5)
+            #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 4, 5)
             pass
 
         if is_poisoned:
@@ -54,6 +60,11 @@ class FlwrClient(fl.client.NumPyClient):
         x = self.x_train
         y = self.y_train
 
+        if FEDPROX:
+            fedprox = FedProx()
+            new_weights = fedprox.fit(parameters, x, y, self.newold)
+            return new_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
+        
         if self.pga_poisoning:
             return self.pga_poison(parameters, x, y)
         if self.pga_poisoning_split:

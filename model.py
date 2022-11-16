@@ -1,6 +1,7 @@
 from keras import layers, regularizers
 from keras.models import Sequential
 
+
 def create_model(data):
     if data=="cifar10":
         model = Sequential()

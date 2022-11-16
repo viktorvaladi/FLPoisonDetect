@@ -14,7 +14,48 @@ import numpy as np
 from keras.utils import np_utils
 import pandas as pd
 
-batch_size = 32
+
+## cifar-10 dirichlet idx map
+dirichlet = True
+n_parties = 40
+beta = 0.1
+(x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
+min_size = 0
+min_require_size = 10
+K = 10
+N = y_train.shape[0]
+#np.random.seed(2020)
+net_dataidx_map = {}
+
+while min_size < min_require_size:
+    idx_batch = [[] for _ in range(n_parties)]
+    for k in range(K):
+        idx_k = np.where(y_train == k)[0]
+        np.random.shuffle(idx_k)
+        proportions = np.random.dirichlet(np.repeat(beta, n_parties))
+        # logger.info("proportions1: ", proportions)
+        # logger.info("sum pro1:", np.sum(proportions))
+        ## Balance
+        proportions = np.array([p * (len(idx_j) < N / n_parties) for p, idx_j in zip(proportions, idx_batch)])
+        # logger.info("proportions2: ", proportions)
+        proportions = proportions / proportions.sum()
+        # logger.info("proportions3: ", proportions)
+        proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
+        # logger.info("proportions4: ", proportions)
+        idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))]
+        min_size = min([len(idx_j) for idx_j in idx_batch])
+        # if K == 2 and n_parties <= 10:
+        #     if np.min(proportions) < 200:
+        #         min_size = 0
+        #         break
+
+
+for j in range(n_parties):
+    np.random.shuffle(idx_batch[j])
+    net_dataidx_map[j] = idx_batch[j]
+
+
+##cifar10 
 
 def get_train_ds(num_of_clients, client_index, data):
   if data=="cifar10":
@@ -22,11 +63,20 @@ def get_train_ds(num_of_clients, client_index, data):
     length = len(x_train)
     partition = client_index
     part_size = length/num_of_clients
-    x_train = x_train[int(partition*part_size) : int(((partition+1)*part_size)-1) ]
-    y_train = y_train[ int(partition*part_size) : int(((partition+1)*part_size)-1) ]
-    y_train = np_utils.to_categorical(y_train, 10)
-    x_train = x_train.astype('float32')
-    return x_train, y_train
+    if dirichlet:
+      x_ret = []
+      y_ret = []
+      for idx in net_dataidx_map[client_index]:
+        x_ret.append(x_train[idx])
+        y_ret.append(y_train[idx])
+      x_ret = np.array(x_ret)
+      y_ret = np.array(y_ret)
+    else:
+      x_ret = x_train[int(partition*part_size) : int(((partition+1)*part_size)-1) ]
+      y_ret = y_train[ int(partition*part_size) : int(((partition+1)*part_size)-1) ]
+    y_ret = np_utils.to_categorical(y_ret, 10)
+    x_ret = x_ret.astype('float32')
+    return x_ret, y_ret
   if data=="emnist":
     train = pd.read_csv('../emnist/emnist-balanced-train.csv', header=None)
     
