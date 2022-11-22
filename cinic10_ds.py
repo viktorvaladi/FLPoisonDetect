@@ -16,7 +16,7 @@ import pandas as pd
 
 
 ## cifar-10 dirichlet idx map
-dirichlet = True
+dirichlet = False
 n_parties = 40
 beta = 0.1
 (x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
@@ -24,7 +24,7 @@ min_size = 0
 min_require_size = 10
 K = 10
 N = y_train.shape[0]
-#np.random.seed(2020)
+np.random.seed(2022)
 net_dataidx_map = {}
 
 while min_size < min_require_size:

@@ -9,7 +9,7 @@ class FedProx:
         self.model = self.get_model()
         self.optimizer = keras.optimizers.Adam()
         self.loss_fn = keras.losses.categorical_crossentropy
-        self.batch_size = 128
+        self.batch_size = 125
         self.epochs = 10
 
     

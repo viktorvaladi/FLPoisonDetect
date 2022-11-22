@@ -9,10 +9,10 @@ from cinic10_ds import get_test_val_ds
 from model import create_model
 import math
 from ray.util.multiprocessing import Pool
+import copy
 
 def multiprocess_evaluate(data, model, weights, x_test, y_test):
     model.set_weights(weights)  # Update model with the latest parameters
-    loss, accuracy = model.evaluate(x_test,y_test)
     preds = model.predict(x_test)
     spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
     spec_label_all_count = [0.0 for i in range(len(y_test[0]))]
@@ -26,10 +26,16 @@ def multiprocess_evaluate(data, model, weights, x_test, y_test):
             spec_label_correct_count[true] = spec_label_correct_count[true] +1
     spec_label_accuracy = []
     spec_label_loss = []
+    all_sum = 0
+    all_acc_correct = 0
+    all_loss_correct = 0
     for i in range(len(spec_label_all_count)):
+        all_sum += spec_label_all_count[i]
         spec_label_accuracy.append(spec_label_correct_count[i]/spec_label_all_count[i])
+        all_acc_correct += spec_label_correct_count[i]
         spec_label_loss.append(spec_label_loss_count[i]/spec_label_all_count[i])
-    return np.mean(spec_label_loss), {"accuracy": accuracy}, spec_label_accuracy, spec_label_loss
+        all_loss_correct += spec_label_loss_count[i]
+    return all_loss_correct/all_sum, {"accuracy": all_acc_correct/all_sum}, spec_label_accuracy, spec_label_loss
 
 class Poison_detect:
     # md_factor determines by how much more we want to favor the stronger client updates
@@ -47,6 +53,7 @@ class Poison_detect:
         self.md_label = md_label
         self.md_heterogenous = md_heterogenous
         self.ld = ld
+        self.pre_reset_ld = ld
     
     def calculate_partitions(self,results, last_agg_w, round_nr):
         if self.newold == "fedprox" or self.newold == "fedavg":
@@ -56,18 +63,106 @@ class Poison_detect:
             return asd, []
         # part_agg will be between 0-1 how big part each client should take of aggregation
         label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results, last_agg_w, round_nr)
-        points = {}
-        points, overall_mean = self.get_points_overall(loss_dict, results, points=points)
-        points = self.get_points_label(label_loss_dict, results, overall_mean, points, last_loss, last_label_loss, round_nr)
-        points_iid = {}
-        points_iid = self.get_points_iid(label_loss_dict, results, overall_mean, points_iid, last_loss, last_label_loss, round_nr)
-        part_agg = self.points_to_parts(points)
-        part_agg_iid = self.points_to_parts(points_iid)
-        if self.newold == "new":
-            list_norms_to_add = self.norms_from_parts(part_agg_iid, results, last_agg_w)
-        else:
-            list_norms_to_add = []
-        return part_agg, list_norms_to_add
+        adaptiveMdAccs = []
+        adaptiveMdDicts = []
+        adaptiveMdTests = []
+        adaptiveMdLAccs = []
+        adaptiveMdLDicts = []
+        adaptiveMdLTests = []
+        adaptiveLdAccs = []
+        adaptiveLdDicts = []
+        # remove all and keep Ld with (reset and reset back to pre reset)
+        adaptiveLdTests = [self.ld, max(1,self.ld-0.5), self.ld+0.5, 3, self.pre_reset_ld]
+        i = 0
+        for elem in adaptiveMdTests:
+            self.md_overall = elem
+            points = {}
+            points, overall_mean = self.get_points_overall(loss_dict, results, points=points)
+            points = self.get_points_label(label_loss_dict, results, overall_mean, points, last_loss, last_label_loss, round_nr)
+            points_iid = {}
+            points_iid = self.get_points_iid(label_loss_dict, results, overall_mean, points_iid, last_loss, last_label_loss, round_nr)
+            part_agg = self.points_to_parts(points)
+            if self.newold == "new":
+                part_agg_iid = self.points_to_parts(points_iid)
+                list_norms_to_add = self.norms_from_parts(part_agg_iid, results, last_agg_w)
+            else:
+                list_norms_to_add = []
+            agg_copy_weights = self.agg_copy_weights(results, part_agg, last_agg_w)
+            _, loss, _, _ = self.evclient(agg_copy_weights)
+            adaptiveMdDicts.append(part_agg)
+            adaptiveMdAccs.append(loss) 
+            print(f"acc on {i}: {acc}")
+            i = i+1
+        
+        idx_max = np.argmin(adaptiveMdAccs)
+        self.md_overall = adaptiveMdTests[idx_max]
+        print(f"self.md is now: {self.md_overall}")
+
+        i = 0
+        for elem in adaptiveMdLTests:
+            self.md_label = elem
+            points = {}
+            points, overall_mean = self.get_points_overall(loss_dict, results, points=points)
+            points = self.get_points_label(label_loss_dict, results, overall_mean, points, last_loss, last_label_loss, round_nr)
+            points_iid = {}
+            points_iid = self.get_points_iid(label_loss_dict, results, overall_mean, points_iid, last_loss, last_label_loss, round_nr)
+            part_agg = self.points_to_parts(points)
+            if self.newold == "new":
+                part_agg_iid = self.points_to_parts(points_iid)
+                list_norms_to_add = self.norms_from_parts(part_agg_iid, results, last_agg_w)
+            else:
+                list_norms_to_add = []
+            agg_copy_weights = self.agg_copy_weights(results, part_agg, last_agg_w)
+            _, loss, _, _ = self.evclient(agg_copy_weights)
+            adaptiveMdLDicts.append(part_agg)
+            adaptiveMdLAccs.append(loss) 
+            print(f"acc on {i}: {acc}")
+            i = i+1
+        
+        idx_max = np.argmin(adaptiveMdLAccs)
+        self.md_label = adaptiveMdLTests[idx_max]
+        print(f"self.mdl is now: {self.md_label}")
+
+        i = 0
+        for elem in adaptiveLdTests:
+            self.ld = elem
+            points = {}
+            points, overall_mean = self.get_points_overall(loss_dict, results, points=points)
+            points = self.get_points_label(label_loss_dict, results, overall_mean, points, last_loss, last_label_loss, round_nr)
+            points_iid = {}
+            points_iid = self.get_points_iid(label_loss_dict, results, overall_mean, points_iid, last_loss, last_label_loss, round_nr)
+            part_agg = self.points_to_parts(points)
+            if self.newold == "new":
+                part_agg_iid = self.points_to_parts(points_iid)
+                list_norms_to_add = self.norms_from_parts(part_agg_iid, results, last_agg_w)
+            else:
+                list_norms_to_add = []
+            agg_copy_weights = self.agg_copy_weights(results, part_agg, last_agg_w)
+            loss, acc, _, _ = self.evclient(agg_copy_weights)
+            adaptiveLdDicts.append(part_agg)
+            adaptiveLdAccs.append(loss)
+            print(f"acc on {i}: {acc}")
+            i = i+1
+        idx_max = np.argmin(adaptiveLdAccs)
+        if idx_max == 3:
+            self.pre_reset_ld = self.ld
+        self.ld = adaptiveLdTests[idx_max]
+        print(f"self.ld is now: {self.ld}")
+        return adaptiveLdDicts[idx_max], list_norms_to_add
+    
+    def agg_copy_weights(self, results, part_agg, last_weights):
+        _, norms_dict = self.calculate_avg_norms(results,last_weights)
+        ret_weights = []
+        for elem in norms_dict:
+            for i in range(len(norms_dict[elem])):
+                if i < len(ret_weights):
+                    ret_weights[i] = np.add(ret_weights[i], norms_dict[elem][i]*part_agg[elem])
+                else:
+                    ret_weights.append(norms_dict[elem][i]*part_agg[elem])
+        for i in range(len(ret_weights)):
+            ret_weights[i] = np.add(ret_weights[i], last_weights[i])
+        return ret_weights
+        
     
     def norms_from_parts(self, parts, results, last_weights):
         avg_norms, norms_dict = self.calculate_avg_norms(results, last_weights)
@@ -301,7 +396,6 @@ class Poison_detect:
         # The `evaluate` function will be called after every round
         def evaluate(weights: fl.common.NDArrays) -> Optional[Tuple[float, float]]:
             model.set_weights(weights)  # Update model with the latest parameters
-            loss, accuracy = model.evaluate(x_test,y_test)
             preds = model.predict(x_test)
             spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
             spec_label_all_count = [0.0 for i in range(len(y_test[0]))]
@@ -315,10 +409,14 @@ class Poison_detect:
                     spec_label_correct_count[true] = spec_label_correct_count[true] +1
             spec_label_accuracy = []
             spec_label_loss = []
+            all_sum = 0
+            all_acc_correct = 0
+            all_loss_correct = 0
             for i in range(len(spec_label_all_count)):
+                all_sum += spec_label_all_count[i]
                 spec_label_accuracy.append(spec_label_correct_count[i]/spec_label_all_count[i])
+                all_acc_correct += spec_label_correct_count[i]
                 spec_label_loss.append(spec_label_loss_count[i]/spec_label_all_count[i])
-            print('mean loss here!!')
-            print(np.mean(spec_label_loss))
-            return np.mean(spec_label_loss), {"accuracy": accuracy}, spec_label_accuracy, spec_label_loss
+                all_loss_correct += spec_label_loss_count[i]
+            return all_loss_correct/all_sum, {"accuracy": all_acc_correct/all_sum}, spec_label_accuracy, spec_label_loss
         return evaluate

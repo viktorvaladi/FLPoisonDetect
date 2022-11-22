@@ -2,6 +2,7 @@ import os
 import math
 
 from model_ascent import create_model_ascent
+from krum import Krum
 
 # Make TensorFlow logs less verbose
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -24,6 +25,8 @@ from flwr.common import (
     parameters_to_ndarrays,
 )
 
+from cm import Cm
+
 from flwr.server.client_proxy import ClientProxy
 from poison_detect import Poison_detect
 from sim_client import FlwrClient
@@ -40,7 +43,7 @@ DATA = "cifar10"
 NUM_ROUNDS = 60
 NUM_CPUS = 255
 NUM_CLIENTS_PICK = 10
-NEWOLD = "fedavg"
+NEWOLD = "krum"
 
 
 def on_fit_config(server_round):
@@ -182,7 +185,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             sum_run_last += elem[-1]
         print('average final accuracy!:) :')
         print(sum_run_last/len(self.acc_history))
-        np.savetxt('test.out', [sum_run_last/len(self.acc_history)], delimiter=',')
+        np.savetxt('test.out', self.acc_history, delimiter=',')
         if aggregated_weights is not None:
             # Save aggregated_weights
             print(f"Saving round {server_round} aggregated_weights...")
@@ -287,7 +290,7 @@ def client_fn(cid: str) -> fl.client.Client:
     if int(cid) in poisoned_list:
         is_poisoned = True
     
-    noniid_list = [i for i in range(12)]
+    noniid_list = [int(i*NUM_CLIENTS/NUM_CLIENTS_PICK) for i in range(12)]
     is_noniid = False
     if int(cid) in noniid_list:
         is_noniid = True
@@ -303,15 +306,11 @@ def client_fn(cid: str) -> fl.client.Client:
 def main() -> None:
     # Start Flower simulation
     model = create_model(DATA)
-    fl.simulation.start_simulation(
-        client_fn=client_fn,
-        num_clients=NUM_CLIENTS,
-        client_resources={"num_cpus": 1},#, "num_gpus": 0.01},
-        config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
-        keep_initialised=True,
-        strategy=SaveModelStrategy(
-            data=DATA,
-            newold = NEWOLD,
+
+    if NEWOLD == "krum":
+        strat = Krum(
+            num_malicious_clients=int(0.3*NUM_CLIENTS_PICK),
+            num_clients_to_keep=int(0.7*NUM_CLIENTS_PICK),
             initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
             on_evaluate_config_fn=StaticFunctions.evaluate_config,
             min_fit_clients=NUM_CLIENTS_PICK,
@@ -320,7 +319,28 @@ def main() -> None:
             fraction_evaluate=0.0,
             evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
             on_fit_config_fn=on_fit_config,
-        ),
+            evclient=StaticFunctions.get_eval_fn2(model, DATA),
+            )
+    else:
+        strat = SaveModelStrategy(
+                data=DATA,
+                newold = NEWOLD,
+                initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
+                on_evaluate_config_fn=StaticFunctions.evaluate_config,
+                min_fit_clients=NUM_CLIENTS_PICK,
+                min_available_clients=NUM_CLIENTS,
+                fraction_fit=0.1,
+                fraction_evaluate=0.0,
+                evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
+                on_fit_config_fn=on_fit_config,
+                )
+    fl.simulation.start_simulation(
+        client_fn=client_fn,
+        num_clients=NUM_CLIENTS,
+        client_resources={"num_cpus": 20},#, "num_gpus": 0.2},
+        config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
+        keep_initialised=True,
+        strategy=strat,
     )
 
 if __name__ == "__main__":

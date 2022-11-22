@@ -35,7 +35,7 @@ class FlwrClient(fl.client.NumPyClient):
             #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 7, 7)
             pass
         else:
-            #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 4, 5)
+            self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 4, 5)
             pass
 
         if is_poisoned:

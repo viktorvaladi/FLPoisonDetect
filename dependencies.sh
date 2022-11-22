@@ -7,4 +7,6 @@ sleep 25
 poetry shell
 sleep 3
 pip install pandas
+sleep 3
+poetry add tensorflow-gpu
 
