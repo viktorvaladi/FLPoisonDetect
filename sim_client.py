@@ -1,5 +1,16 @@
 import os
 import tensorflow as tf
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.list_logical_devices('GPU')
+    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(e)
 # Make TensorFlow logs less verbose
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -35,7 +46,7 @@ class FlwrClient(fl.client.NumPyClient):
             #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 7, 7)
             pass
         else:
-            self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 4, 5)
+            #self.x_train, self.y_train = self.removeLabels(self.x_train, self.y_train, 4, 5)
             pass
 
         if is_poisoned:
@@ -76,6 +87,7 @@ class FlwrClient(fl.client.NumPyClient):
 
         self.model.fit(x, y, epochs=self.epochs, batch_size=128, validation_split=0.1)
         return self.model.get_weights(), self.train_count, {"is_poisoned" : self.is_poisoned}
+
 
     def evaluate(self, parameters, config):
         self.model.set_weights(parameters)

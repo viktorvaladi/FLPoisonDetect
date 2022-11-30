@@ -146,7 +146,7 @@ class Krum(fl.server.strategy.FedAvg):
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No fit_metrics_aggregation_fn provided")
         _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(parameters_aggregated))
-        self.acc_history.append(lastacc)
+        self.acc_history.append(lastacc.get('accuracy'))
         print('acc history here! :)')
         print(self.acc_history)
         return parameters_aggregated, metrics_aggregated

@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 from flwr.common.logger import log
 from logging import WARNING
 from functools import reduce
+from flwr.server.client_manager import SimpleClientManager
 
 from flwr.common import (
     EvaluateIns,
@@ -25,14 +26,28 @@ from flwr.common import (
     parameters_to_ndarrays,
 )
 
+from sim_app import start_simulation
+
 from cm import Cm
 
 from flwr.server.client_proxy import ClientProxy
 from poison_detect import Poison_detect
 from sim_client import FlwrClient
+from sim_server import Server
 
 import flwr as fl
 import tensorflow as tf
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.list_logical_devices('GPU')
+    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(e)
 from model import create_model
 from cinic10_ds import get_train_ds, get_test_val_ds
 import numpy as np
@@ -43,7 +58,7 @@ DATA = "cifar10"
 NUM_ROUNDS = 60
 NUM_CPUS = 255
 NUM_CLIENTS_PICK = 10
-NEWOLD = "krum"
+NEWOLD = "new"
 
 
 def on_fit_config(server_round):
@@ -141,7 +156,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.model = create_model(data)
         self.sum_threshold = 0
         self.evclient = StaticFunctions.get_eval_fn2(self.model, self.data)
-        self.poison_detect = Poison_detect(2,3,1.5,3, self.data, fraction_boost_iid=0.2, newold=self.newold)
+        self.poison_detect = Poison_detect(4,6,1.5,18, self.data, fraction_boost_iid=0.6, newold=self.newold)
         self.run = 0
         self.agg_history = {}
         self.last_weights = self.model.get_weights()
@@ -306,7 +321,6 @@ def client_fn(cid: str) -> fl.client.Client:
 def main() -> None:
     # Start Flower simulation
     model = create_model(DATA)
-
     if NEWOLD == "krum":
         strat = Krum(
             num_malicious_clients=int(0.3*NUM_CLIENTS_PICK),
@@ -334,13 +348,15 @@ def main() -> None:
                 evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
                 on_fit_config_fn=on_fit_config,
                 )
-    fl.simulation.start_simulation(
+    serv = Server(client_manager=SimpleClientManager(), strategy=strat)
+    start_simulation(
         client_fn=client_fn,
         num_clients=NUM_CLIENTS,
-        client_resources={"num_cpus": 20},#, "num_gpus": 0.2},
+        client_resources={"num_cpus": 1, "num_gpus": 0.2},
+        ray_init_args= {"num_gpus" : 2},
         config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
-        keep_initialised=True,
         strategy=strat,
+        server=serv,
     )
 
 if __name__ == "__main__":

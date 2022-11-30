@@ -1,20 +1,4 @@
-from typing import Dict, Optional, Tuple, List
 
-import flwr as fl
-import tensorflow as tf
-import numpy as np
-from keras.models import Sequential
-from keras import datasets, layers, models
-from keras.utils import np_utils
-from cinic10_ds import get_train_ds, get_test_val_ds, batch_size
-import random
-import os
-from model import create_model
-from sklearn.svm import OneClassSVM
-
-#x_train, y_train = get_train_ds(10,3)
-
-print(np.mean([1,2,3,4,5,6,7]))
 """
 #<class 'tensorflow.python.data.ops.dataset_ops.ShardDataset'>
 #<class 'tuple'>

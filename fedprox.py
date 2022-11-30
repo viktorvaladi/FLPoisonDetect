@@ -1,4 +1,15 @@
 import tensorflow as tf
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.list_logical_devices('GPU')
+    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(e)
 from tensorflow import keras
 from tensorflow.keras import layers, regularizers
 import numpy as np
@@ -80,26 +91,26 @@ class FedProx:
     def get_model(self):
         inputs = keras.Input(shape=(32,32,3), name="digits")
         x1 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(inputs)
-        x2 = layers.BatchNormalization()(x1)
+        x2 = layers.BatchNormalization(scale=False, center=False)(x1)
         x3 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(x2)
-        x4 = layers.BatchNormalization()(x3)
+        x4 = layers.BatchNormalization(scale=False, center=False)(x3)
         x5 = layers.MaxPooling2D(pool_size=(2,2))(x4)
         x6 = layers.Dropout(0.3)(x5)
         x7 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x6)
-        x8 = layers.BatchNormalization()(x7)
+        x8 = layers.BatchNormalization(scale=False, center=False)(x7)
         x9 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x8)
-        x10 = layers.BatchNormalization()(x9)
+        x10 = layers.BatchNormalization(scale=False, center=False)(x9)
         x11 = layers.MaxPooling2D(pool_size=(2,2))(x10)
         x12 = layers.Dropout(0.5)(x11)
         x13 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x12)
-        x14 = layers.BatchNormalization()(x13)
+        x14 = layers.BatchNormalization(scale=False, center=False)(x13)
         x15 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x14)
-        x16 = layers.BatchNormalization()(x15)
+        x16 = layers.BatchNormalization(scale=False, center=False)(x15)
         x17 = layers.MaxPooling2D(pool_size=(2,2))(x16)
         x18 = layers.Dropout(0.5)(x17)
         x19 = layers.Flatten()(x18)
         x20 = layers.Dense(128, activation='relu')(x19)
-        x21 = layers.BatchNormalization()(x20)
+        x21 = layers.BatchNormalization(scale=False, center=False)(x20)
         x22 = layers.Dropout(0.5)(x21)
         outputs = layers.Dense(10, activation='softmax', kernel_regularizer = regularizers.l2(0.0005))(x22)
         model = keras.Model(inputs=inputs, outputs=outputs)
