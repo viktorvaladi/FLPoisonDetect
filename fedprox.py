@@ -14,15 +14,22 @@ from tensorflow import keras
 from tensorflow.keras import layers, regularizers
 import numpy as np
 import copy
+import keras.backend as kb
 
 class FedProx:
-    def __init__(self):
+    def __init__(self, pga):
         self.model = self.get_model()
         self.optimizer = keras.optimizers.Adam()
-        self.loss_fn = keras.losses.categorical_crossentropy
+        if pga:
+            self.loss_fn = self.custom_loss
+        else:
+            self.loss_fn = keras.losses.categorical_crossentropy
         self.batch_size = 125
         self.epochs = 10
-
+    
+    def custom_loss(self, y_actual,y_pred):
+        custom_loss=kb.square(y_actual-y_pred)
+        return custom_loss*(-1)
     
     def fit(self, parameters, x_train, y_train, newold):
         initial_weights = copy.deepcopy(parameters)
@@ -56,7 +63,7 @@ class FedProx:
                     # Compute the loss value for this minibatch.
                     loss_value = self.loss_fn(y_batch_train, logits)
                     if newold == "fedprox":
-                        mu = tf.constant(0.001, dtype=tf.float32)
+                        mu = tf.constant(0.1, dtype=tf.float32)
                         prox_term =(mu/2)*self.difference_model_norm_2_square(self.model.get_weights(), initial_weights)
                         loss = loss_value + prox_term
                     else:
@@ -91,26 +98,26 @@ class FedProx:
     def get_model(self):
         inputs = keras.Input(shape=(32,32,3), name="digits")
         x1 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(inputs)
-        x2 = layers.BatchNormalization(scale=False, center=False)(x1)
+        x2 = layers.GroupNormalization()(x1)
         x3 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(x2)
-        x4 = layers.BatchNormalization(scale=False, center=False)(x3)
+        x4 = layers.GroupNormalization()(x3)
         x5 = layers.MaxPooling2D(pool_size=(2,2))(x4)
         x6 = layers.Dropout(0.3)(x5)
         x7 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x6)
-        x8 = layers.BatchNormalization(scale=False, center=False)(x7)
+        x8 = layers.GroupNormalization()(x7)
         x9 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x8)
-        x10 = layers.BatchNormalization(scale=False, center=False)(x9)
+        x10 = layers.GroupNormalization()(x9)
         x11 = layers.MaxPooling2D(pool_size=(2,2))(x10)
         x12 = layers.Dropout(0.5)(x11)
         x13 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x12)
-        x14 = layers.BatchNormalization(scale=False, center=False)(x13)
+        x14 = layers.GroupNormalization()(x13)
         x15 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x14)
-        x16 = layers.BatchNormalization(scale=False, center=False)(x15)
+        x16 = layers.GroupNormalization()(x15)
         x17 = layers.MaxPooling2D(pool_size=(2,2))(x16)
         x18 = layers.Dropout(0.5)(x17)
         x19 = layers.Flatten()(x18)
         x20 = layers.Dense(128, activation='relu')(x19)
-        x21 = layers.BatchNormalization(scale=False, center=False)(x20)
+        x21 = layers.GroupNormalization()(x20)
         x22 = layers.Dropout(0.5)(x21)
         outputs = layers.Dense(10, activation='softmax', kernel_regularizer = regularizers.l2(0.0005))(x22)
         model = keras.Model(inputs=inputs, outputs=outputs)

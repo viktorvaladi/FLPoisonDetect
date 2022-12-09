@@ -109,6 +109,7 @@ class Krum(fl.server.strategy.FedAvg):
 
         self.acc_history = []
         self.evclient = evclient
+        self.bd_history = []
 
     def __repr__(self) -> str:
         rep = f"Krum(accept_failures={self.accept_failures})"
@@ -145,8 +146,10 @@ class Krum(fl.server.strategy.FedAvg):
             metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
         elif server_round == 1:  # Only log this warning once
             log(WARNING, "No fit_metrics_aggregation_fn provided")
-        _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(parameters_aggregated))
+        _,lastacc, agg_label_acc, bd = self.evclient(parameters_to_ndarrays(parameters_aggregated))
         self.acc_history.append(lastacc.get('accuracy'))
+        self.bd_history.append(bd)
+        print(f"backdoor history: {self.bd_history}")
         print('acc history here! :)')
         print(self.acc_history)
         return parameters_aggregated, metrics_aggregated

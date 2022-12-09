@@ -94,13 +94,13 @@ class Poison_detect:
         print(f"self.ld is now: {self.ld}")
         if self.newold == "new":
             part_agg_iid = self.points_to_parts(points_iid)
-            list_norms_to_add = self.norms_from_parts(part_agg_iid, results, last_agg_w)
+            list_norms_to_add = self.norms_from_parts(part_agg_iid, results, last_agg_w, adaptiveLdDicts[idx_max])
         else:
             list_norms_to_add = []
         return adaptiveLdDicts[idx_max], list_norms_to_add
     
     def agg_copy_weights(self, results, part_agg, last_weights):
-        _, norms_dict = self.calculate_avg_norms(results,last_weights)
+        _, norms_dict = self.calculate_avg_norms1(results,last_weights)
         ret_weights = []
         for elem in norms_dict:
             for i in range(len(norms_dict[elem])):
@@ -113,25 +113,24 @@ class Poison_detect:
         return ret_weights
         
     
-    def norms_from_parts(self, parts, results, last_weights):
-        avg_norms, norms_dict = self.calculate_avg_norms(results, last_weights)
+    def norms_from_parts(self, parts, results, last_weights, parts_score):
+        avg_norms, norms_dict = self.calculate_avg_norms(results, last_weights, parts_score)
         no_weights = np.sum([np.prod(list(v.shape)) for v in last_weights])*self.fraction_boost_iid
-        empty_weights = self.get_empty_weights()
-        weights_to_remove_prep = copy.deepcopy(empty_weights)
-        weights_to_remove = []
-        weights_to_add = copy.deepcopy(empty_weights)
-        for i in range(len(weights_to_remove_prep)):
-            weights_to_remove.append(np.add(1, weights_to_remove_prep[i]))
-        weights_to_div = copy.deepcopy(weights_to_remove)
+        print(f"Weights total: {no_weights}")
+        remove = self.get_empty_weights()
+        weights_to_div_prep = copy.deepcopy(remove)
+        weights_to_div = []
+        weights_to_add = copy.deepcopy(remove)
+        for i in range(len(weights_to_div_prep)):
+            weights_to_div.append(np.add(1, weights_to_div_prep[i]))
         for elem in parts:
             if parts[elem] > 0:
                 no_weights_elem = int(no_weights * parts[elem])
-                print(no_weights)
-                print(no_weights_elem)
                 dif_norms = []
                 for i in range(len(norms_dict[elem])):
                     dif_norms.append(np.subtract(norms_dict[elem][i],avg_norms[i]))
                 # find indexes of n largest absolute values in dif norms..
+                print(f"Weights for client: {no_weights_elem}")
                 while no_weights_elem > 0:
                     # find index of largest dif and set it to 0
                     list_maxes = []
@@ -143,18 +142,18 @@ class Poison_detect:
                     index_list_max = np.argmax(list_maxes)
                     dif_norms[index_list_max][index_maxes[index_list_max]] = 0
                     if weights_to_add[index_list_max][index_maxes[index_list_max]] == 0:
-                        weights_to_remove[index_list_max][index_maxes[index_list_max]] = (-1)*avg_norms[index_list_max][index_maxes[index_list_max]]
+                        remove[index_list_max][index_maxes[index_list_max]] = (-1)*avg_norms[index_list_max][index_maxes[index_list_max]]
                     else:
                         weights_to_div[index_list_max][index_maxes[index_list_max]] = 1 + weights_to_div[index_list_max][index_maxes[index_list_max]]
                     weights_to_add[index_list_max][index_maxes[index_list_max]] += norms_dict[elem][index_list_max][index_maxes[index_list_max]]
                     no_weights_elem = no_weights_elem-1
         idx = np.unravel_index(abs(weights_to_add[0]).argmax(), weights_to_add[0].shape)
         print(f"Weight to add: {weights_to_add[0][idx]}")
-        print(f"Weight to remove: {weights_to_remove[0][idx]}")
+        print(f"Weight to remove: {remove[0][idx]}")
         print(f"Weight to div: {weights_to_div[0][idx]}")
         for i in range(len(weights_to_add)):
             weights_to_add[i] = np.divide(weights_to_add[i],weights_to_div[i])
-            weights_to_add[i] = np.add(weights_to_add[i], weights_to_remove[i])
+            weights_to_add[i] = np.add(weights_to_add[i], remove[i])
         print(f"Weight result: {weights_to_add[0][idx]}")
         return [weights_to_add]
     
@@ -172,7 +171,7 @@ class Poison_detect:
             norms.append(np.subtract(weights[i], last_weights[i]))
         return norms
     
-    def calculate_avg_norms(self, results, last_weights):
+    def calculate_avg_norms1(self, results, last_weights):
         norms_dict = {}
         norms_list = []
         for elem in results:
@@ -183,6 +182,27 @@ class Poison_detect:
         for w_indx in range(len(norms_list[0])):
             for c_indx in range(1, len(norms_list)):
                 norms_avg[w_indx] = np.add(norms_avg[w_indx] , norms_list[c_indx][w_indx])
+
+        
+        for i in range(len(norms_avg)):
+            norms_avg[i] = norms_avg[i]/len(norms_list)
+        return norms_avg, norms_dict
+    
+    def calculate_avg_norms(self, results, last_weights, parts_score):
+        norms_dict = {}
+        norms_list = []
+        for elem in results:
+            norm = self.get_norms(parameters_to_ndarrays(elem[1].parameters),last_weights)
+            norms_dict[elem[0]] = norm
+            norms_list.append(norm)
+        norms_avg = []
+        for w_indx in range(len(norms_list[0])):
+            for elem in norms_dict:
+                if w_indx < len(norms_avg):
+                    norms_avg[w_indx] = np.add(norms_avg[w_indx] , norms_dict[elem][w_indx]*parts_score[elem])
+                else:
+                    norms_avg.append(norms_dict[elem][w_indx]*parts_score[elem])
+                    
 
         
         for i in range(len(norms_avg)):

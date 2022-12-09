@@ -58,7 +58,7 @@ DATA = "cifar10"
 NUM_ROUNDS = 60
 NUM_CPUS = 255
 NUM_CLIENTS_PICK = 10
-NEWOLD = "new"
+NEWOLD = "krum"
 
 
 def on_fit_config(server_round):
@@ -115,16 +115,23 @@ class StaticFunctions():
             preds = model.predict(x_test)
             spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
             spec_label_all_count = [0.0 for i in range(len(y_test[0]))]
+            backdoor_count = 0
+            backdoor_success = 0
             for i in range(len(preds)):
                 pred = np.argmax(preds[i])
                 true = np.argmax(y_test[i])
                 spec_label_all_count[true] = spec_label_all_count[true] +1
                 if true == pred:
                     spec_label_correct_count[true] = spec_label_correct_count[true] +1
+                # for backdoor
+                if true == 4:
+                    backdoor_count += 1
+                    if pred == 7:
+                        backdoor_success += 1
             spec_label_accuracy = []
             for i in range(len(spec_label_all_count)):
                 spec_label_accuracy.append(spec_label_correct_count[i]/spec_label_all_count[i])
-            return loss, {"accuracy": accuracy}, spec_label_accuracy
+            return loss, {"accuracy": accuracy}, spec_label_accuracy, spec_label_accuracy[7]
 
         return evaluate
 
@@ -156,10 +163,11 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.model = create_model(data)
         self.sum_threshold = 0
         self.evclient = StaticFunctions.get_eval_fn2(self.model, self.data)
-        self.poison_detect = Poison_detect(4,6,1.5,18, self.data, fraction_boost_iid=0.6, newold=self.newold)
+        self.poison_detect = Poison_detect(2,3,1.5,24, self.data, fraction_boost_iid=0.6, newold=self.newold)
         self.run = 0
         self.agg_history = {}
         self.last_weights = self.model.get_weights()
+        self.bd_history = []
     
     def aggregate_fit(
         self,
@@ -191,7 +199,9 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
 
         self.last_weights = parameters_to_ndarrays(aggregated_weights[0])
 
-        _,lastacc, agg_label_acc = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
+        _,lastacc, agg_label_acc, bd = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
+        self.bd_history.append(bd)
+        print(f"backdoor history: {self.bd_history}")
         print('accuracy here! :)')
         self.acc_history[self.run].append(lastacc.get('accuracy'))
         print(f'acc history: {self.acc_history}')
@@ -300,7 +310,7 @@ def client_fn(cid: str) -> fl.client.Client:
     model = create_model(DATA)
     model_ascent = create_model(DATA)
     
-    poisoned_list = [i for i in range(12)]
+    poisoned_list = [i for i in range(4)]
     is_poisoned = False
     if int(cid) in poisoned_list:
         is_poisoned = True
@@ -323,8 +333,8 @@ def main() -> None:
     model = create_model(DATA)
     if NEWOLD == "krum":
         strat = Krum(
-            num_malicious_clients=int(0.3*NUM_CLIENTS_PICK),
-            num_clients_to_keep=int(0.7*NUM_CLIENTS_PICK),
+            num_malicious_clients=int(0.5*NUM_CLIENTS_PICK),
+            num_clients_to_keep=int(0.5*NUM_CLIENTS_PICK),
             initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
             on_evaluate_config_fn=StaticFunctions.evaluate_config,
             min_fit_clients=NUM_CLIENTS_PICK,

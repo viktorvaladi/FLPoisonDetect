@@ -39,6 +39,8 @@ class FlwrClient(fl.client.NumPyClient):
         self.lazy_poisoning = False
         self.pga_poisoning = False
         self.pga_poisoning_split = False
+        self.spec_label_poison = False
+        self.pga_label = False
         self.epochs = 10
         self.train_count = len(x_train)
         self.test_count = len(x_val)
@@ -52,11 +54,13 @@ class FlwrClient(fl.client.NumPyClient):
         if is_poisoned:
             #self.y_train = self.poisonRandomLabel(y_train = self.y_train, no_labels=3000)
             #self.x_train = self.poisonRandomPixels(x_train = self.x_train)
-            #self.y_train = self.poisonSpecificLabel(y_train=self.y_train, part_of_labels=1.0,label=2,to_label='random')
+            self.y_train = self.poison_specific_label(y_train=self.y_train, part_of_labels=1.0,label=4,to_label=7)
+            #self.pga_label = True
+            #self.spec_label_poison = True
             #self.lazy_poisoning = True
             #self.pga_poisoning_split = True
             #self.pga_poisoning = True
-            #self.pga_scaler = 0.1
+            self.pga_scaler = 3
             #self.epochs = 30
             pass
         else:
@@ -71,15 +75,19 @@ class FlwrClient(fl.client.NumPyClient):
         x = self.x_train
         y = self.y_train
 
-        if FEDPROX:
-            fedprox = FedProx()
-            new_weights = fedprox.fit(parameters, x, y, self.newold)
-            return new_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
-        
         if self.pga_poisoning:
             return self.pga_poison(parameters, x, y)
         if self.pga_poisoning_split:
             return self.pga_poison_split(parameters, x, y)
+        if self.spec_label_poison:
+            return self.spec_label_poisoning(parameters)
+        if self.pga_label:
+            return self.pga_poison_label(parameters, x, y, 7)
+
+        if FEDPROX:
+            fedprox = FedProx(pga=False)
+            new_weights = fedprox.fit(parameters, x, y, self.newold)
+            return new_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
 
         self.model.set_weights(parameters)
         if self.lazy_poisoning:
@@ -182,17 +190,46 @@ class FlwrClient(fl.client.NumPyClient):
     
     def pga_poison(self,parameters, x, y):
         self.model_ascent.set_weights(parameters)
-        last_weights = self.model_ascent.get_weights()
-        self.model_ascent.fit(x, y, epochs=self.epochs, batch_size=128, validation_split=0.1)
-        new_weights = self.model_ascent.get_weights()
+        last_weights = copy.deepcopy(self.model_ascent.get_weights())
+        fedprox = FedProx(pga=True)
+        new_weights = fedprox.fit(parameters, x, y, self.newold)
         for i in range(len(last_weights)):
             scaled_norm = np.subtract(new_weights[i],last_weights[i])*self.pga_scaler
             last_weights[i] = np.add(last_weights[i],scaled_norm)
         return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
     
+    def spec_label_poisoning(self,parameters):
+        self.model.set_weights(parameters)
+        last_weights = copy.deepcopy(self.model.get_weights())
+        fedprox = FedProx(pga=False)
+        new_weights = fedprox.fit(copy.deepcopy(parameters), self.x_train, self.y_train, self.newold)
+        new_weights_bad = fedprox.fit(parameters, self.x_pois, self.y_pois, self.newold)
+        for i in range(len(last_weights)):
+            scaled_bad_norm = np.subtract(new_weights_bad[i],last_weights[i])*self.pga_scaler
+            good_norm = np.subtract(new_weights[i],last_weights[i])
+            last_weights[i] = np.add(last_weights[i],scaled_bad_norm)
+            last_weights[i] = np.add(last_weights[i],good_norm)
+        return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
+    
     def pga_poison_split(self,parameters, x, y):
         l_list = self.find_worst_labels(parameters)
         x_improve, y_improve, x_worsen, y_worsen = self.split_data(l_list, x, y)
+        self.model_ascent.set_weights(parameters)
+        self.model.set_weights(parameters)
+        last_weights = self.model_ascent.get_weights()
+        self.model_ascent.fit(x_worsen, y_worsen, epochs=self.epochs, batch_size=128, validation_split=0.1)
+        self.model.fit(x_improve, y_improve, epochs=self.epochs, batch_size=128, validation_split=0.1)
+        new_weights = self.model_ascent.get_weights()
+        new_weights_good = self.model.get_weights()
+        for i in range(len(last_weights)):
+            scaled_norm = np.subtract(new_weights[i],last_weights[i])*self.pga_scaler
+            good_norm = np.subtract(new_weights_good[i], last_weights[i])
+            last_weights[i] = np.add(last_weights[i],scaled_norm)
+            last_weights[i] = np.add(last_weights[i],good_norm)
+        return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
+    
+    def pga_poison_label(self,parameters, x, y, label):
+        x_improve, y_improve, x_worsen, y_worsen = self.split_data([label], x, y)
         self.model_ascent.set_weights(parameters)
         self.model.set_weights(parameters)
         last_weights = self.model_ascent.get_weights()

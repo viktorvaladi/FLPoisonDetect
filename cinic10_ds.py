@@ -17,7 +17,7 @@ import pandas as pd
 
 ## cifar-10 dirichlet idx map
 dirichlet = False
-n_parties = 20
+n_parties = 40
 beta = 0.1
 (x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
 min_size = 0
