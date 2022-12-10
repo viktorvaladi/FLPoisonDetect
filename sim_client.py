@@ -27,7 +27,7 @@ from fedprox import FedProx
 FEDPROX = True
 
 class FlwrClient(fl.client.NumPyClient):
-    def __init__(self, model, model_ascent, x_train, y_train, x_val, y_val, is_poisoned, is_noniid, newold) -> None:
+    def __init__(self, model, model_ascent, x_train, y_train, x_val, y_val, is_poisoned, is_noniid, newold, pgascaler) -> None:
         super().__init__()
         self.newold = newold
         self.model = model
@@ -60,7 +60,7 @@ class FlwrClient(fl.client.NumPyClient):
             #self.lazy_poisoning = True
             #self.pga_poisoning_split = True
             #self.pga_poisoning = True
-            self.pga_scaler = 3
+            self.pga_scaler = pgascaler
             #self.epochs = 30
             pass
         else:
@@ -231,12 +231,11 @@ class FlwrClient(fl.client.NumPyClient):
     def pga_poison_label(self,parameters, x, y, label):
         x_improve, y_improve, x_worsen, y_worsen = self.split_data([label], x, y)
         self.model_ascent.set_weights(parameters)
-        self.model.set_weights(parameters)
         last_weights = self.model_ascent.get_weights()
-        self.model_ascent.fit(x_worsen, y_worsen, epochs=self.epochs, batch_size=128, validation_split=0.1)
-        self.model.fit(x_improve, y_improve, epochs=self.epochs, batch_size=128, validation_split=0.1)
-        new_weights = self.model_ascent.get_weights()
-        new_weights_good = self.model.get_weights()
+        fgood = FedProx(pga=False)
+        fbad = FedProx(pga=True)
+        new_weights_good = fgood.fit(copy.deepcopy(parameters), x_improve, y_improve, self.newold)
+        new_weights = fbad.fit(copy.deepcopy(parameters), x_worsen, y_worsen, self.newold)
         for i in range(len(last_weights)):
             scaled_norm = np.subtract(new_weights[i],last_weights[i])*self.pga_scaler
             good_norm = np.subtract(new_weights_good[i], last_weights[i])

@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 from flwr.common.logger import log
 from logging import WARNING
 from functools import reduce
-from flwr.server.client_manager import SimpleClientManager
+from client_manager import SimpleClientManager
 
 from flwr.common import (
     EvaluateIns,
@@ -27,8 +27,6 @@ from flwr.common import (
 )
 
 from sim_app import start_simulation
-
-from cm import Cm
 
 from flwr.server.client_proxy import ClientProxy
 from poison_detect import Poison_detect
@@ -58,7 +56,7 @@ DATA = "cifar10"
 NUM_ROUNDS = 60
 NUM_CPUS = 255
 NUM_CLIENTS_PICK = 10
-NEWOLD = "krum"
+STRATS = [['krum', 4, 0.1],['krum', 4, 0.5], ['krum', 4, 1],['krum', 4, 2.5], ['krum', 4, 5], ['krum', 4, 10], ['krum', 4, 20]]
 
 
 def on_fit_config(server_round):
@@ -304,51 +302,40 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             yield n
             n += 1
 
+def get_client_fn(strat, no_poison, pgascaler):
+    def client_fn(cid: str) -> fl.client.Client:
+        # Load model
+        model = create_model(DATA)
+        model_ascent = create_model(DATA)
+        
+        poisoned_list = [i for i in range(no_poison)]
+        is_poisoned = False
+        if int(cid) in poisoned_list:
+            is_poisoned = True
+        
+        noniid_list = [int(i*NUM_CLIENTS/NUM_CLIENTS_PICK) for i in range(12)]
+        is_noniid = False
+        if int(cid) in noniid_list:
+            is_noniid = True
 
-def client_fn(cid: str) -> fl.client.Client:
-    # Load model
-    model = create_model(DATA)
-    model_ascent = create_model(DATA)
-    
-    poisoned_list = [i for i in range(4)]
-    is_poisoned = False
-    if int(cid) in poisoned_list:
-        is_poisoned = True
-    
-    noniid_list = [int(i*NUM_CLIENTS/NUM_CLIENTS_PICK) for i in range(12)]
-    is_noniid = False
-    if int(cid) in noniid_list:
-        is_noniid = True
+        # Load data partition (divide MNIST into NUM_CLIENTS distinct partitions)
+        x_train, y_train = get_train_ds(NUM_CLIENTS, int(cid), DATA)
+        x_test, y_test = get_test_val_ds(DATA)
+        x_test, y_test = x_test, y_test
 
-    # Load data partition (divide MNIST into NUM_CLIENTS distinct partitions)
-    x_train, y_train = get_train_ds(NUM_CLIENTS, int(cid), DATA)
-    x_test, y_test = get_test_val_ds(DATA)
-    x_test, y_test = x_test, y_test
-
-    # Create and return client
-    return FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid, NEWOLD)
+        # Create and return client
+        return FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid, strat, pgascaler)
+    return client_fn
 
 def main() -> None:
     # Start Flower simulation
-    model = create_model(DATA)
-    if NEWOLD == "krum":
-        strat = Krum(
-            num_malicious_clients=int(0.5*NUM_CLIENTS_PICK),
-            num_clients_to_keep=int(0.5*NUM_CLIENTS_PICK),
-            initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
-            on_evaluate_config_fn=StaticFunctions.evaluate_config,
-            min_fit_clients=NUM_CLIENTS_PICK,
-            min_available_clients=NUM_CLIENTS,
-            fraction_fit=0.1,
-            fraction_evaluate=0.0,
-            evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
-            on_fit_config_fn=on_fit_config,
-            evclient=StaticFunctions.get_eval_fn2(model, DATA),
-            )
-    else:
-        strat = SaveModelStrategy(
-                data=DATA,
-                newold = NEWOLD,
+    res = {}
+    for elem in STRATS:
+        model = create_model(DATA)
+        if elem[0] == "krum":
+            strat = Krum(
+                num_malicious_clients=int(0.5*NUM_CLIENTS_PICK),
+                num_clients_to_keep=int(0.5*NUM_CLIENTS_PICK),
                 initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
                 on_evaluate_config_fn=StaticFunctions.evaluate_config,
                 min_fit_clients=NUM_CLIENTS_PICK,
@@ -357,17 +344,35 @@ def main() -> None:
                 fraction_evaluate=0.0,
                 evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
                 on_fit_config_fn=on_fit_config,
+                evclient=StaticFunctions.get_eval_fn2(model, DATA),
                 )
-    serv = Server(client_manager=SimpleClientManager(), strategy=strat)
-    start_simulation(
-        client_fn=client_fn,
-        num_clients=NUM_CLIENTS,
-        client_resources={"num_cpus": 1, "num_gpus": 0.2},
-        ray_init_args= {"num_gpus" : 2},
-        config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
-        strategy=strat,
-        server=serv,
-    )
+        else:
+            strat = SaveModelStrategy(
+                    data=DATA,
+                    newold = elem[0],
+                    initial_parameters=fl.common.ndarrays_to_parameters(model.get_weights()),
+                    on_evaluate_config_fn=StaticFunctions.evaluate_config,
+                    min_fit_clients=NUM_CLIENTS_PICK,
+                    min_available_clients=NUM_CLIENTS,
+                    fraction_fit=0.1,
+                    fraction_evaluate=0.0,
+                    evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
+                    on_fit_config_fn=on_fit_config,
+                    )
+        serv = Server(client_manager=SimpleClientManager(), strategy=strat)
+        start_simulation(
+            client_fn=get_client_fn(elem[0],elem[1],elem[2]),
+            num_clients=NUM_CLIENTS,
+            client_resources={"num_cpus": 1, "num_gpus": 0.2},
+            ray_init_args= {"num_gpus" : 2},
+            config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
+            strategy=strat,
+            server=serv,
+        )
+        res[elem[0]+str(elem[1])] = strat.bd_history
+    
+    for elem in res:
+        print(f"{elem}: {res[elem]}")
 
 if __name__ == "__main__":
     main()
