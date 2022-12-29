@@ -41,7 +41,7 @@ def multiprocess_evaluate(data, model, weights, x_test, y_test):
 
 class Poison_detect:
     # md_factor determines by how much more we want to favor the stronger client updates
-    def __init__(self, md_overall = 1.5, md_label = 1.5, md_heterogenous = 1.5, ld = 4, data="cifar10", fraction_boost_iid=0.2, newold = "new"):
+    def __init__(self, md_overall = 1.5, md_label = 1.5, md_heterogenous = 1.5, ld = 4, data="cifar10", fraction_boost_iid=0.2, newold = "new", val_elems = 5000):
         self.fraction_boost_iid = fraction_boost_iid
         self.newold = newold
         self.data = data
@@ -49,16 +49,29 @@ class Poison_detect:
         self.evclient = Poison_detect.get_eval_fn(self.model, self.data)
         x_test, y_test = get_test_val_ds(self.data)
         self.no_labels = len(y_test[0])
-        self.x_test = x_test[0:int(len(x_test)/2)]
-        self.y_test = y_test[0:int(len(y_test)/2)]
+        self.x_test = x_test[0:val_elems]
+        self.y_test = y_test[0:val_elems]
         self.md_overall = md_overall
         self.md_label = md_label
         self.md_heterogenous = md_heterogenous
         self.ld = ld
         self.pre_reset_ld = ld
     
+    def getOneEach(self, x_test, y_test):
+        x_ret = []
+        y_ret = []
+        for i in range (len(y_test)):
+            found = False
+            for elem in y_ret:
+                if np.array_equal(y_test[i],elem):
+                    found = True
+            if not found:
+                x_ret.append(x_test[i])
+                y_ret.append(y_test[i])
+        return np.array(x_ret), np.array(y_ret)
+            
     def calculate_partitions(self,results, last_agg_w, round_nr):
-        if self.newold == "fedprox" or self.newold == "fedavg":
+        if self.newold == "fedprox" or self.newold == "fedavg" or self.newold == "lfr":
             asd = {}
             for elem in results:
                 asd[elem[0]] = 0

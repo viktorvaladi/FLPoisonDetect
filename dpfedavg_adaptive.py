@@ -55,9 +55,9 @@ class DPFedAvgAdaptive(DPFedAvgFixed):
         self.clip_norm_target_quantile = clip_norm_target_quantile
         self.clip_count_stddev = clip_count_stddev
         if self.clip_count_stddev is None:
-            self.clip_count_stddev = 0
+            self.clip_count_stddev = 0.1
             if noise_multiplier > 0:
-                self.clip_count_stddev = self.num_sampled_clients / 20.0
+                self.clip_count_stddev = self.num_sampled_clients / 15.0
 
         if noise_multiplier:
             self.noise_multiplier = (

@@ -16,12 +16,12 @@ import pandas as pd
 
 
 ## cifar-10 dirichlet idx map
-dirichlet = False
-n_parties = 40
-beta = 0.1
+dirichlet = True
+n_parties = 1000
+beta = 0.3
 (x_train, y_train), (_, _) = tf.keras.datasets.cifar10.load_data()
 min_size = 0
-min_require_size = 10
+min_require_size = 1
 K = 10
 N = y_train.shape[0]
 np.random.seed(2022)
@@ -105,6 +105,22 @@ def get_train_ds(num_of_clients, client_index, data):
     y_train = np_utils.to_categorical(y_train, 47)
     x_train = x_train.astype('float32')
     return x_train, y_train
+  if data=="femnist":
+    train = pd.read_pickle(r'../femnist/'+str(client_index)+'/train.pickle')
+    x = train["x"]
+    y = train["y"]
+    y_train = np_utils.to_categorical(y,62)
+    x_train = []
+    for elem in x:
+      x_train.append(np.asarray(elem))
+    val = pd.read_pickle(r'../femnist/'+str(client_index)+'/val.pickle')
+    xv = val["x"]
+    yv = val["y"]
+    y_val = np_utils.to_categorical(yv,62)
+    x_val = []
+    for elem in xv:
+      x_val.append(np.asarray(elem))
+    return np.concatenate((np.array(x_train), np.array(x_val)), axis=0), np.concatenate((y_train, y_val), axis=0)
 
 def get_test_val_ds(data):
   if data=="cifar10":
@@ -135,3 +151,22 @@ def get_test_val_ds(data):
     x_test = x_test.astype('float32')
     y_test = np_utils.to_categorical(y_test, 47)
     return x_test, y_test
+  if data=="femnist":
+    x_test = np.array([])
+    y_test = np.array([])
+    for i in range(3597):
+      test = pd.read_pickle(r'../femnist/'+str(i)+'/train.pickle')
+      x = test["x"]
+      y = test["y"]
+      y_add = np_utils.to_categorical(y,62)
+      x_add = []
+      for elem in x:
+        x_add.append(np.asarray(elem))
+      if i == 0:
+        x_test = x_add
+        y_test = y_add
+      else:
+        x_test = np.concatenate((x_test,np.array(x_add)), axis=0)
+        y_test = np.concatenate((y_test,y_add),axis=0)
+    return x_test, y_test
+    

@@ -17,8 +17,8 @@ import copy
 import keras.backend as kb
 
 class FedProx:
-    def __init__(self, pga):
-        self.model = self.get_model()
+    def __init__(self, pga, data):
+        self.model = self.get_model(data)
         self.optimizer = keras.optimizers.Adam()
         if pga:
             self.loss_fn = self.custom_loss
@@ -95,30 +95,58 @@ class FedProx:
         return squared_norm
 
 
-    def get_model(self):
-        inputs = keras.Input(shape=(32,32,3), name="digits")
-        x1 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(inputs)
-        x2 = layers.GroupNormalization()(x1)
-        x3 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(x2)
-        x4 = layers.GroupNormalization()(x3)
-        x5 = layers.MaxPooling2D(pool_size=(2,2))(x4)
-        x6 = layers.Dropout(0.3)(x5)
-        x7 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x6)
-        x8 = layers.GroupNormalization()(x7)
-        x9 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x8)
-        x10 = layers.GroupNormalization()(x9)
-        x11 = layers.MaxPooling2D(pool_size=(2,2))(x10)
-        x12 = layers.Dropout(0.5)(x11)
-        x13 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x12)
-        x14 = layers.GroupNormalization()(x13)
-        x15 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x14)
-        x16 = layers.GroupNormalization()(x15)
-        x17 = layers.MaxPooling2D(pool_size=(2,2))(x16)
-        x18 = layers.Dropout(0.5)(x17)
-        x19 = layers.Flatten()(x18)
-        x20 = layers.Dense(128, activation='relu')(x19)
-        x21 = layers.GroupNormalization()(x20)
-        x22 = layers.Dropout(0.5)(x21)
-        outputs = layers.Dense(10, activation='softmax', kernel_regularizer = regularizers.l2(0.0005))(x22)
-        model = keras.Model(inputs=inputs, outputs=outputs)
-        return model
+    def get_model(self, data):
+        if data == "cifar10":
+            inputs = keras.Input(shape=(32,32,3), name="digits")
+            x1 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(inputs)
+            x2 = layers.GroupNormalization()(x1)
+            x3 = layers.Conv2D(32, (3,3), padding='same', activation='relu')(x2)
+            x4 = layers.GroupNormalization()(x3)
+            x5 = layers.MaxPooling2D(pool_size=(2,2))(x4)
+            x6 = layers.Dropout(0.3)(x5)
+            x7 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x6)
+            x8 = layers.GroupNormalization()(x7)
+            x9 = layers.Conv2D(64, (3,3), padding='same', activation='relu')(x8)
+            x10 = layers.GroupNormalization()(x9)
+            x11 = layers.MaxPooling2D(pool_size=(2,2))(x10)
+            x12 = layers.Dropout(0.5)(x11)
+            x13 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x12)
+            x14 = layers.GroupNormalization()(x13)
+            x15 = layers.Conv2D(128, (3,3), padding='same', activation='relu')(x14)
+            x16 = layers.GroupNormalization()(x15)
+            x17 = layers.MaxPooling2D(pool_size=(2,2))(x16)
+            x18 = layers.Dropout(0.5)(x17)
+            x19 = layers.Flatten()(x18)
+            x20 = layers.Dense(128, activation='relu')(x19)
+            x21 = layers.GroupNormalization()(x20)
+            x22 = layers.Dropout(0.5)(x21)
+            outputs = layers.Dense(10, activation='softmax', kernel_regularizer = regularizers.l2(0.0005))(x22)
+            model = keras.Model(inputs=inputs, outputs=outputs)
+            return model
+        if data == "femnist":
+            inputs = keras.Input(shape=(28,28,1), name="digits")
+            x1 = layers.Conv2D(28, (3,3), padding='same', activation='relu')(inputs)
+            x2 = layers.GroupNormalization(28)(x1)
+            x3 = layers.Conv2D(28, (3,3), padding='same', activation='relu')(x2)
+            x4 = layers.GroupNormalization(28)(x3)
+            x5 = layers.MaxPooling2D(pool_size=(2,2))(x4)
+            x6 = layers.Dropout(0.3)(x5)
+            x7 = layers.Conv2D(56, (3,3), padding='same', activation='relu')(x6)
+            x8 = layers.GroupNormalization(28)(x7)
+            x9 = layers.Conv2D(56, (3,3), padding='same', activation='relu')(x8)
+            x10 = layers.GroupNormalization(28)(x9)
+            x11 = layers.MaxPooling2D(pool_size=(2,2))(x10)
+            x12 = layers.Dropout(0.5)(x11)
+            x13 = layers.Conv2D(112, (3,3), padding='same', activation='relu')(x12)
+            x14 = layers.GroupNormalization(28)(x13)
+            x15 = layers.Conv2D(112, (3,3), padding='same', activation='relu')(x14)
+            x16 = layers.GroupNormalization(28)(x15)
+            x17 = layers.MaxPooling2D(pool_size=(2,2))(x16)
+            x18 = layers.Dropout(0.5)(x17)
+            x19 = layers.Flatten()(x18)
+            x20 = layers.Dense(112, activation='relu')(x19)
+            x21 = layers.GroupNormalization(28)(x20)
+            x22 = layers.Dropout(0.5)(x21)
+            outputs = layers.Dense(62, activation='softmax', kernel_regularizer = regularizers.l2(0.0005))(x22)
+            model = keras.Model(inputs=inputs, outputs=outputs)
+            return model

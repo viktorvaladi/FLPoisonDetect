@@ -27,8 +27,9 @@ from fedprox import FedProx
 FEDPROX = True
 
 class FlwrClient(fl.client.NumPyClient):
-    def __init__(self, model, model_ascent, x_train, y_train, x_val, y_val, is_poisoned, is_noniid, newold, pgascaler) -> None:
+    def __init__(self, model, model_ascent, x_train, y_train, x_val, y_val, is_poisoned, is_noniid, newold, pgascaler, data) -> None:
         super().__init__()
+        self.data = data
         self.newold = newold
         self.model = model
         self.model_ascent = model_ascent
@@ -54,12 +55,12 @@ class FlwrClient(fl.client.NumPyClient):
         if is_poisoned:
             #self.y_train = self.poisonRandomLabel(y_train = self.y_train, no_labels=3000)
             #self.x_train = self.poisonRandomPixels(x_train = self.x_train)
-            self.y_train = self.poison_specific_label(y_train=self.y_train, part_of_labels=1.0,label=4,to_label=7)
+            #self.y_train = self.poison_specific_label(y_train=self.y_train, part_of_labels=1.0,label=4,to_label=7)
             #self.pga_label = True
             #self.spec_label_poison = True
             #self.lazy_poisoning = True
-            #self.pga_poisoning_split = True
-            #self.pga_poisoning = True
+            #self.pga_poisoning_split = True DEPLETED fix test data from sim!!
+            self.pga_poisoning = True
             self.pga_scaler = pgascaler
             #self.epochs = 30
             pass
@@ -85,7 +86,7 @@ class FlwrClient(fl.client.NumPyClient):
             return self.pga_poison_label(parameters, x, y, 7)
 
         if FEDPROX:
-            fedprox = FedProx(pga=False)
+            fedprox = FedProx(pga=False, data=self.data)
             new_weights = fedprox.fit(parameters, x, y, self.newold)
             return new_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
 
@@ -191,7 +192,7 @@ class FlwrClient(fl.client.NumPyClient):
     def pga_poison(self,parameters, x, y):
         self.model_ascent.set_weights(parameters)
         last_weights = copy.deepcopy(self.model_ascent.get_weights())
-        fedprox = FedProx(pga=True)
+        fedprox = FedProx(pga=True,data=self.data)
         new_weights = fedprox.fit(parameters, x, y, self.newold)
         for i in range(len(last_weights)):
             scaled_norm = np.subtract(new_weights[i],last_weights[i])*self.pga_scaler
@@ -201,7 +202,7 @@ class FlwrClient(fl.client.NumPyClient):
     def spec_label_poisoning(self,parameters):
         self.model.set_weights(parameters)
         last_weights = copy.deepcopy(self.model.get_weights())
-        fedprox = FedProx(pga=False)
+        fedprox = FedProx(pga=False, data=self.data)
         new_weights = fedprox.fit(copy.deepcopy(parameters), self.x_train, self.y_train, self.newold)
         new_weights_bad = fedprox.fit(parameters, self.x_pois, self.y_pois, self.newold)
         for i in range(len(last_weights)):
@@ -229,11 +230,11 @@ class FlwrClient(fl.client.NumPyClient):
         return last_weights, self.train_count, {"is_poisoned" : self.is_poisoned}
     
     def pga_poison_label(self,parameters, x, y, label):
-        x_improve, y_improve, x_worsen, y_worsen = self.split_data([label], x, y)
+        x_improve, y_improve, x_worsen, y_worsen = self.split_data([i if i != label else None for i in range(10)], x, y)
         self.model_ascent.set_weights(parameters)
         last_weights = self.model_ascent.get_weights()
-        fgood = FedProx(pga=False)
-        fbad = FedProx(pga=True)
+        fgood = FedProx(pga=False, data=self.data)
+        fbad = FedProx(pga=True, data=self.data)
         new_weights_good = fgood.fit(copy.deepcopy(parameters), x_improve, y_improve, self.newold)
         new_weights = fbad.fit(copy.deepcopy(parameters), x_worsen, y_worsen, self.newold)
         for i in range(len(last_weights)):

@@ -29,9 +29,11 @@ from flwr.common import (
 from sim_app import start_simulation
 
 from flwr.server.client_proxy import ClientProxy
+from flwr.client.dpfedavg_numpy_client import DPFedAvgNumPyClient
 from poison_detect import Poison_detect
 from sim_client import FlwrClient
 from sim_server import Server
+from dpfedavg_adaptive import DPFedAvgAdaptive
 
 import flwr as fl
 import tensorflow as tf
@@ -51,14 +53,14 @@ from cinic10_ds import get_train_ds, get_test_val_ds
 import numpy as np
 import random
 
-NUM_CLIENTS = 40
-DATA = "cifar10"
-NUM_ROUNDS = 60
+NUM_CLIENTS = 3597
+DATA = "femnist"
+NUM_ROUNDS = 200
 NUM_CPUS = 255
-NUM_CLIENTS_PICK = 10
-STRATS = [['krum', 4, 0.1],['krum', 4, 0.5], ['krum', 4, 1],['krum', 4, 2.5], ['krum', 4, 5], ['krum', 4, 10], ['krum', 4, 20]]
-
-
+NUM_CLIENTS_PICK = 30
+#STRATS = [['krum', 4, 1, True],['krum', 4, 1, False], ['krum', 4, 1.5, True],['krum', 4, 1.5, False], ['krum', 4, 2, True], ['krum', 4, 2, False], ['krum', 4, 2.5, True], ['krum', 4, 2.5, False], ['old', 4, 1, True],['old', 4, 1, False], ['old', 4, 1.5, True],['old', 4, 1.5, False], ['old', 4, 2, True], ['old', 4, 2, False], ['old', 4, 2.5, True], ['old', 4, 2.5, False], ['fedavg', 4, 1, True],['fedavg', 4, 1, False], ['fedavg', 4, 1.5, True],['fedavg', 4, 1.5, False], ['fedavg', 4, 2, True], ['fedavg', 4, 2, False], ['fedavg', 4, 2.5, True], ['fedavg', 4, 2.5, False]]
+#STRATS = [['old', 4, 1, False, 5000], ['old', 4, 1, False, 2500], ['old', 4, 1, False, 1250], ['old', 4, 1, False, 600], ['old', 4, 1, False, 300]]
+STRATS = [['fedavg', 0, 1, False, 620],['old', 0, 1, False, 620]]
 def on_fit_config(server_round):
     return {
         'current_round': server_round,
@@ -144,7 +146,7 @@ class StaticFunctions():
         return {"val_steps": val_steps}
 
 class SaveModelStrategy(fl.server.strategy.FedAvg):
-    def __init__(self, data, newold, *args, **kwargs):
+    def __init__(self, data, newold, no_val_elems, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.data = data
         self.newold = newold
@@ -155,13 +157,13 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.agg_label_final = []
         self.round = 0
         self.label_acc_history = []
-        self.geti = self.fun(1000)
+        self.geti = self.fun(10000)
         self.pointList = {}
         self.mapPoisonClients = {}
         self.model = create_model(data)
         self.sum_threshold = 0
         self.evclient = StaticFunctions.get_eval_fn2(self.model, self.data)
-        self.poison_detect = Poison_detect(2,3,1.5,24, self.data, fraction_boost_iid=0.6, newold=self.newold)
+        self.poison_detect = Poison_detect(2,3,1.5,10, self.data, fraction_boost_iid=0.6, newold=self.newold, val_elems=no_val_elems)
         self.run = 0
         self.agg_history = {}
         self.last_weights = self.model.get_weights()
@@ -189,7 +191,8 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
                 self.agg_history[elem].append(part_agg.get(elem))
             else:
                 self.agg_history[elem] = [part_agg.get(elem)]
-            
+        if self.newold == "lfr":
+            aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, weights_to_add, failures)
         if self.newold == "new" or self.newold == "old":
             aggregated_weights = self.aggregate_fit2(server_round, results, part_agg, weights_to_add, failures)
         if self.newold == "fedprox" or self.newold == "fedavg":
@@ -202,7 +205,6 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         print(f"backdoor history: {self.bd_history}")
         print('accuracy here! :)')
         self.acc_history[self.run].append(lastacc.get('accuracy'))
-        print(f'acc history: {self.acc_history}')
         sum_run_last = 0
         for elem in self.acc_history:
             sum_run_last += elem[-1]
@@ -215,7 +217,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             #np.savez(f"round-{server_round}-weights.npz", *aggregated_weights)
             
             #print accuracy and variance and poison/total visists for clients
-            if server_round % 60 == 0 and server_round != 0:
+            if server_round % 10000 == 0 and server_round != 0:
                 self.model = create_model(self.data)
                 aggregated_weights = (ndarrays_to_parameters(self.model.get_weights()), {})
                 self.run = self.run+1
@@ -234,6 +236,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
                 print('AGG LABEL AVERAGE ALL TURNS!!! :')
                 print(agg_label_avg)
             self.totPoisCleanPrint(self.total_counts, agg_label_acc)
+            print(f'acc history: {self.acc_history}')
         return aggregated_weights
     
     def aggregate_fit2(
@@ -247,6 +250,26 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         """Aggregate fit results using weighted average."""
         if not results:
             return None, {}
+        if self.newold == "lfr":
+            no_clients = len(results)
+            remove = int(round(no_clients*0.3))
+            per_client = 1/(no_clients-remove)
+            losses = {}
+            part_agg = {}
+            for elem in results:
+                loss, _, _, _ = self.evclient(elem[1].parameters)
+                losses[elem[0]] = loss
+                part_agg[elem[0]] = per_client
+            while remove>0:
+                most = 0
+                target = ":)"
+                for elem in losses:
+                    if losses[elem] > most:
+                        most = losses[elem]
+                        target = elem
+                losses[target] = 0
+                part_agg[target] = 0
+                remove -= 1
 
         # Convert results
         weights_results = [
@@ -302,7 +325,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
             yield n
             n += 1
 
-def get_client_fn(strat, no_poison, pgascaler):
+def get_client_fn(strat, no_poison, pgascaler, dp):
     def client_fn(cid: str) -> fl.client.Client:
         # Load model
         model = create_model(DATA)
@@ -320,11 +343,15 @@ def get_client_fn(strat, no_poison, pgascaler):
 
         # Load data partition (divide MNIST into NUM_CLIENTS distinct partitions)
         x_train, y_train = get_train_ds(NUM_CLIENTS, int(cid), DATA)
-        x_test, y_test = get_test_val_ds(DATA)
-        x_test, y_test = x_test, y_test
+        #x_test, y_test = get_test_val_ds(DATA)
+        x_test, y_test = x_train, y_train
 
         # Create and return client
-        return FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid, strat, pgascaler)
+        client = FlwrClient(model, model_ascent, x_train, y_train, x_test, y_test, is_poisoned, is_noniid, strat, pgascaler, DATA)
+        dpClient = None
+        if dp:
+            dpClient = DPFedAvgNumPyClient(client=client)
+        return dpClient if dpClient is not None else client
     return client_fn
 
 def main() -> None:
@@ -332,6 +359,7 @@ def main() -> None:
     res = {}
     for elem in STRATS:
         model = create_model(DATA)
+        dpstrat = None
         if elem[0] == "krum":
             strat = Krum(
                 num_malicious_clients=int(0.5*NUM_CLIENTS_PICK),
@@ -358,21 +386,32 @@ def main() -> None:
                     fraction_evaluate=0.0,
                     evaluate_fn=StaticFunctions.get_eval_fn(model, DATA),
                     on_fit_config_fn=on_fit_config,
+                    no_val_elems=elem[4],
                     )
-        serv = Server(client_manager=SimpleClientManager(), strategy=strat)
+        if elem[3]:
+            dpstrat = DPFedAvgAdaptive(strategy=strat,
+            num_sampled_clients=NUM_CLIENTS_PICK,
+            server_side_noising=False,
+            init_clip_norm=50.0,
+            noise_multiplier=0.0005,
+            clip_norm_target_quantile=0.5,
+            )
+        serv = Server(client_manager=SimpleClientManager(), strategy=dpstrat if dpstrat is not None else strat)
         start_simulation(
-            client_fn=get_client_fn(elem[0],elem[1],elem[2]),
+            client_fn=get_client_fn(elem[0],elem[1],elem[2],elem[3]),
             num_clients=NUM_CLIENTS,
             client_resources={"num_cpus": 1, "num_gpus": 0.2},
             ray_init_args= {"num_gpus" : 2},
             config=fl.server.ServerConfig(num_rounds=NUM_ROUNDS),
-            strategy=strat,
+            strategy=dpstrat if dpstrat is not None else strat,
             server=serv,
         )
-        res[elem[0]+str(elem[1])] = strat.bd_history
+        print(elem[0]+str(elem[2])+str(elem[3])+str(elem[4]))
+        res[elem[0]+str(elem[2])+str(elem[3])+str(elem[4])] = strat.acc_history
+        np.savez('res.npz',**res)
     
     for elem in res:
-        print(f"{elem}: {res[elem]}")
+        print(f"{elem} = {res[elem]}")
 
 if __name__ == "__main__":
     main()
