@@ -71,13 +71,36 @@ class Poison_detect:
         return np.array(x_ret), np.array(y_ret)
             
     def calculate_partitions(self,results, last_agg_w, round_nr):
-        if self.newold == "fedprox" or self.newold == "fedavg" or self.newold == "lfr":
+        if self.newold == "fedprox" or self.newold == "fedavg":
             asd = {}
             for elem in results:
                 asd[elem[0]] = 0
             return asd, []
         # part_agg will be between 0-1 how big part each client should take of aggregation
         label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results, last_agg_w, round_nr)
+        if self.newold == "lfr":
+            no_clients = len(results)
+            remove = int(round(no_clients*0.3))
+            per_client = 1/(no_clients-remove)
+            losses = {}
+            part_agg = {}
+            asd = []
+            for elem in loss_dict:
+                asd.append(loss_dict.get(elem))
+            for i in range(len(results)):
+                losses[results[i][0]] = asd[i]
+                part_agg[results[i][0]] = per_client
+            while remove>0:
+                most = 0
+                target = ":)"
+                for elem in losses:
+                    if losses[elem] > most:
+                        most = losses[elem]
+                        target = elem
+                losses[target] = 0
+                part_agg[target] = 0
+                remove -= 1
+            return part_agg, []
         adaptiveLdAccs = []
         adaptiveLdDicts = []
         # remove all and keep Ld with (reset and reset back to pre reset)

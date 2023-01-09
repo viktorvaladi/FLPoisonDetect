@@ -60,7 +60,7 @@ NUM_CPUS = 255
 NUM_CLIENTS_PICK = 30
 #STRATS = [['krum', 4, 1, True],['krum', 4, 1, False], ['krum', 4, 1.5, True],['krum', 4, 1.5, False], ['krum', 4, 2, True], ['krum', 4, 2, False], ['krum', 4, 2.5, True], ['krum', 4, 2.5, False], ['old', 4, 1, True],['old', 4, 1, False], ['old', 4, 1.5, True],['old', 4, 1.5, False], ['old', 4, 2, True], ['old', 4, 2, False], ['old', 4, 2.5, True], ['old', 4, 2.5, False], ['fedavg', 4, 1, True],['fedavg', 4, 1, False], ['fedavg', 4, 1.5, True],['fedavg', 4, 1.5, False], ['fedavg', 4, 2, True], ['fedavg', 4, 2, False], ['fedavg', 4, 2.5, True], ['fedavg', 4, 2.5, False]]
 #STRATS = [['old', 4, 1, False, 5000], ['old', 4, 1, False, 2500], ['old', 4, 1, False, 1250], ['old', 4, 1, False, 600], ['old', 4, 1, False, 300]]
-STRATS = [['fedavg', 0, 1, False, 620],['old', 0, 1, False, 620]]
+STRATS = [['lfr', 360, 0.1, False, 900], ['lfr', 360, 0.1, True, 900], ['lfr', 360, 0.5, False, 900], ['lfr', 360, 0.5, True, 900], ['lfr', 0, 100, False, 900]]
 def on_fit_config(server_round):
     return {
         'current_round': server_round,
@@ -201,10 +201,10 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.last_weights = parameters_to_ndarrays(aggregated_weights[0])
 
         _,lastacc, agg_label_acc, bd = self.evclient(parameters_to_ndarrays(aggregated_weights[0]))
-        self.bd_history.append(bd)
+        self.bd_history.append(np.mean(np.absolute(agg_label_acc - np.mean(agg_label_acc))))
         print(f"backdoor history: {self.bd_history}")
         print('accuracy here! :)')
-        self.acc_history[self.run].append(lastacc.get('accuracy'))
+        self.acc_history[self.run].append(np.mean(agg_label_acc))
         sum_run_last = 0
         for elem in self.acc_history:
             sum_run_last += elem[-1]
@@ -237,6 +237,7 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
                 print(agg_label_avg)
             self.totPoisCleanPrint(self.total_counts, agg_label_acc)
             print(f'acc history: {self.acc_history}')
+            print(f'bd history: {self.bd_history}')
         return aggregated_weights
     
     def aggregate_fit2(
@@ -250,26 +251,6 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         """Aggregate fit results using weighted average."""
         if not results:
             return None, {}
-        if self.newold == "lfr":
-            no_clients = len(results)
-            remove = int(round(no_clients*0.3))
-            per_client = 1/(no_clients-remove)
-            losses = {}
-            part_agg = {}
-            for elem in results:
-                loss, _, _, _ = self.evclient(elem[1].parameters)
-                losses[elem[0]] = loss
-                part_agg[elem[0]] = per_client
-            while remove>0:
-                most = 0
-                target = ":)"
-                for elem in losses:
-                    if losses[elem] > most:
-                        most = losses[elem]
-                        target = elem
-                losses[target] = 0
-                part_agg[target] = 0
-                remove -= 1
 
         # Convert results
         weights_results = [

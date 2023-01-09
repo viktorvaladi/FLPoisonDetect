@@ -154,7 +154,7 @@ def get_test_val_ds(data):
   if data=="femnist":
     x_test = np.array([])
     y_test = np.array([])
-    for i in range(3597):
+    for i in range(300):
       test = pd.read_pickle(r'../femnist/'+str(i)+'/train.pickle')
       x = test["x"]
       y = test["y"]
