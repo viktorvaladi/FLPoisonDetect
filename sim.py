@@ -90,7 +90,6 @@ class StaticFunctions():
             model.set_weights(weights)  # Update model with the latest parameters
             loss, accuracy = model.evaluate(x_test,y_test)
             return loss, {"accuracy": accuracy}
-
         return evaluate
 
     @staticmethod

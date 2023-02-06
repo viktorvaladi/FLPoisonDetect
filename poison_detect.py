@@ -80,7 +80,7 @@ class Poison_detect:
         label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results, last_agg_w, round_nr)
         if self.newold == "lfr":
             no_clients = len(results)
-            remove = int(round(no_clients*0.3))
+            remove = int(round(no_clients*0.4))
             per_client = 1/(no_clients-remove)
             losses = {}
             part_agg = {}

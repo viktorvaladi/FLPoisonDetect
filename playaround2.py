@@ -2,27 +2,37 @@ import numpy as np
 import pandas as pd
 from math import comb
 import matplotlib.pyplot as plt
+import matplotlib
 # from keras.utils import np_utils
 # from numpy import asarray
 
+font = {'weight' : 'bold',
+        'size'   : 16}
+
+matplotlib.rc('font', **font)
+
 # a = np.load('res.npz')
+# i = 0
 # for elem in a:
-#     print(f"{elem} = {list(a[elem])}")
+#     if i == 0:
+#         print(f"{elem} = {list(a[elem][-5:])}")
+#     i = i+1
 
 
-# def binomial_probability(n, k, p):
-#   return comb(n, k) * (p**k) * ((1 - p)**(n - k))
+def binomial_probability(n, k, p):
+  return comb(n, k) * (p**k) * ((1 - p)**(n - k))
 
-# # probability of getting 9 or more red elements
-# prob = sum(binomial_probability(30, x, 0.1) for x in range(12, 31))
-# print(prob)
+# probability of getting 9 or more red elements
+prob = sum(binomial_probability(30, x, 0.1) for x in range(12, 31))
+print(prob)
 
-# x = [1-((1-prob)**i) for i in range(200000)]
-# title = "Probability to get 40% malicious elements \n in at least one pull with 10% malicious clients"
-# plt.plot(x)
-# plt.xlabel("Communication rounds")
-# plt.ylabel("Probability")
+x = [1-((1-prob)**i) for i in range(200000)]
+print(x[0:5])
+title = "Probability of exceeding the threshold for \n malicious clients"
+plt.plot(x)
+plt.xlabel("Communication rounds")
+plt.ylabel("Probability")
 
-# plt.legend(loc='upper left')
+plt.legend(loc='upper left')
 # plt.title(title)
-# plt.show()
+plt.show()
