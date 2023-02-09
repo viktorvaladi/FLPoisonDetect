@@ -5,10 +5,9 @@ import matplotlib.pyplot as plt
 import matplotlib
 # from keras.utils import np_utils
 # from numpy import asarray
-
-font = {'weight' : 'bold',
-        'size'   : 16}
-
+plt.rcParams["font.family"] = "Times New Roman"
+font = {'size'   : 16}
+import matplotlib.ticker as ticker
 matplotlib.rc('font', **font)
 
 # a = np.load('res.npz')
@@ -32,7 +31,8 @@ title = "Probability of exceeding the threshold for \n malicious clients"
 plt.plot(x)
 plt.xlabel("Communication rounds")
 plt.ylabel("Probability")
-
+plt.xticks([0,50000,100000,150000,200000], 
+           ["0", "50K", "100K", "150K", "200K"])
 plt.legend(loc='upper left')
 # plt.title(title)
 plt.show()

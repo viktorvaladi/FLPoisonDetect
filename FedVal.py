@@ -12,7 +12,7 @@ from ray.util.multiprocessing import Pool
 import copy
 
 def multiprocess_evaluate(data, model, weights, x_test, y_test):
-    model.set_weights(weights)  # Update model with the latest parameters
+    model.set_weights(weights) 
     preds = model.predict(x_test)
     spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
     spec_label_all_count = [0.0 for i in range(len(y_test[0]))]
@@ -42,28 +42,29 @@ def multiprocess_evaluate(data, model, weights, x_test, y_test):
     return np.mean(spec_label_loss), {"accuracy": all_acc_correct/all_sum}, spec_label_accuracy, spec_label_loss
 
 class Poison_detect:
-    # md_factor determines by how much more we want to favor the stronger client updates
-    def __init__(self, x_val, y_val, model, md_overall = 2, md_label = 3, ld = 3):
+    # s1_factor determines by how much more we want to favor the stronger client updates
+    # s2 determines how important it is for labels to not fall behind
+    def __init__(self, x_val, y_val, model, s1_overall = 2, s1_label = 3, s2 = 3):
         self.model = model
         self.evclient = Poison_detect.get_eval_fn(self.model, x_val, y_val)
         self.x_test = x_val
         self.y_test = y_val
         self.no_labels = len(y_val[0])
-        self.md_overall = md_overall
-        self.md_label = md_label
-        self.ld = ld
-        self.pre_reset_ld = ld
+        self.s1_overall = s1_overall
+        self.s1_label = s1_label
+        self.s2 = s2
+        self.pre_reset_s2 = s2
             
     def calculate_partitions(self,results, last_agg_w):
         label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results)
-        adaptiveLdLoss = []
-        adaptiveLdParts = []
+        adaptives2Loss = []
+        adaptives2Parts = []
         weights = []
         # this should be parallelized
-        adaptiveLdTests = [self.ld, max(1,self.ld-0.5), self.ld+0.5, 3, self.pre_reset_ld]
+        adaptives2Tests = [self.s2, max(1,self.s2-0.5), self.s2+0.5, 3, self.pre_reset_s2]
         i = 0
-        for elem in adaptiveLdTests:
-            self.ld = elem
+        for elem in adaptives2Tests:
+            self.s2 = elem
             points = {}
             points, overall_mean = self.get_points_overall(loss_dict, results, points=points)
             points = self.get_points_label(label_loss_dict, results, overall_mean, points, last_loss, last_label_loss)
@@ -71,15 +72,15 @@ class Poison_detect:
             agg_copy_weights = self.agg_copy_weights(results, part_agg, last_agg_w)
             weights.append(agg_copy_weights)
             loss, acc, _, _ = self.evclient(agg_copy_weights)
-            adaptiveLdParts.append(part_agg)
-            adaptiveLdLoss.append(loss)
+            adaptives2Parts.append(part_agg)
+            adaptives2Loss.append(loss)
             print(f"acc on {i}: {acc}")
             i = i+1
-        idx_max = np.argmin(adaptiveLdLoss)
+        idx_max = np.argmin(adaptives2Loss)
         if idx_max == 3:
-            self.pre_reset_ld = self.ld
-        self.ld = adaptiveLdTests[idx_max]
-        print(f"self.ld is now: {self.ld}")
+            self.pre_reset_s2 = self.s2
+        self.s2 = adaptives2Tests[idx_max]
+        print(f"self.s2 is now: {self.s2}")
         return weights[idx_max]
     
     def agg_copy_weights(self, results, part_agg, last_weights):
@@ -144,11 +145,11 @@ class Poison_detect:
         mad_calc = all_for_score.copy()
         for i in range(len(mad_calc)):
             mad_calc[i] = abs(mad_calc[i])
-        no_elems = round(0.8*len(mad_calc))
+        no_elems = round(len(mad_calc))
         mad_calc.sort()
         mad_calc = mad_calc[:no_elems]
         mad = np.mean(mad_calc)
-        slope = 10/(self.md_overall*mad)
+        slope = self.s1_overall/mad
         for i in range(len(all_for_score)):
             points[results[i][0]] = points.get(results[i][0],0) + slope*all_for_score[i] + 10
         #individual label points
@@ -167,17 +168,17 @@ class Poison_detect:
             mad_calc = all_for_score.copy()
             for j in range(len(mad_calc)):
                 mad_calc[j] = abs(mad_calc[j])
-            no_elems = round(0.8*len(mad_calc))
+            no_elems = round(len(mad_calc))
             mad_calc.sort()
             mad_calc = mad_calc[:no_elems]
             mad = np.mean(mad_calc)
-            slope = 10/(self.md_label*mad)
+            slope = self.s1_label/mad
 
             dif = (mean - overall_mean)
             x = ((overall_mean+dif)/overall_mean)
-            factor = x**self.ld
+            factor = x**self.s2
             for k in range(len(all_for_score)):
-                points[results[k][0]] = points.get(results[k][0],0) + (max(1,factor))*slope*all_for_score[k]+10
+                points[results[k][0]] = points.get(results[k][0],0) + (max(1,factor))*slope*all_for_score[k] + 10
         return points
 
     def par_results_ev(self, result):
