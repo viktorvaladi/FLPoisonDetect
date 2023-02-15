@@ -8,7 +8,7 @@ from model import create_model
 from model_ascent import create_model_ascent
 from cinic10_ds import get_test_val_ds
 import numpy as np
-
+#:)
 
 class FLClient(fl.client.NumPyClient):
     def __init__(self, x_train, y_train, x_test, y_test, is_poisoned, is_noniid, data):
