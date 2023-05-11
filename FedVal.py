@@ -2,16 +2,12 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
 from typing import Optional, Tuple, List
-import flwr as fl
 import numpy as np
-from flwr.common import parameters_to_ndarrays
-from cinic10_ds import get_test_val_ds
-from model import create_model
 import math
 from ray.util.multiprocessing import Pool
 import copy
 
-def multiprocess_evaluate(data, model, weights, x_test, y_test):
+def multiprocess_evaluate(model, weights, x_test, y_test):
     model.set_weights(weights) 
     preds = model.predict(x_test)
     spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]
@@ -54,13 +50,19 @@ class Poison_detect:
         self.s1_label = s1_label
         self.s2 = s2
         self.pre_reset_s2 = s2
-            
-    def calculate_partitions(self,results, last_agg_w):
+    
+    """
+    Input is results: List[Tuple]. The list contains Tuples where first element in the tuple is client ID and second 
+    element in tuple is a list of ndarrays for the updated client model of client with said ID. last_agg_w is the global 
+    models weights for the last round, used to calculate norms. Returns an aggregation of each updated client model based 
+    on input parameters
+    """
+    def calculate_new_aggregated(self,results: List[Tuple], last_agg_w: list):
         label_acc_dict, nodes_acc, loss_dict, label_loss_dict, last_loss, last_label_loss = self.calculate_accs(results)
         adaptives2Loss = []
         adaptives2Parts = []
         weights = []
-        # this should be parallelized
+        # this could be parallelized
         adaptives2Tests = [self.s2, max(1,self.s2-0.5), self.s2+0.5, 3, self.pre_reset_s2]
         i = 0
         for elem in adaptives2Tests:
@@ -74,7 +76,7 @@ class Poison_detect:
             loss, acc, _, _ = self.evclient(agg_copy_weights)
             adaptives2Parts.append(part_agg)
             adaptives2Loss.append(loss)
-            print(f"acc on {i}: {acc}")
+            print(f"acc on {elem}: {acc}")
             i = i+1
         idx_max = np.argmin(adaptives2Loss)
         if idx_max == 3:
@@ -107,7 +109,7 @@ class Poison_detect:
         norms_dict = {}
         norms_list = []
         for elem in results:
-            norm = self.get_norms(parameters_to_ndarrays(elem[1].parameters),last_weights)
+            norm = self.get_norms(elem[1],last_weights)
             norms_dict[elem[0]] = norm
             norms_list.append(norm)
         norms_avg = copy.deepcopy(norms_list[0])
@@ -182,7 +184,7 @@ class Poison_detect:
         return points
 
     def par_results_ev(self, result):
-        loss, acc, lab_acc,lab_loss = multiprocess_evaluate(self.data, self.model, parameters_to_ndarrays(result[1].parameters), self.x_test, self.y_test)
+        loss, acc, lab_acc,lab_loss = multiprocess_evaluate(self.data, self.model, result[1], self.x_test, self.y_test)
         return [result[0], loss, acc, lab_acc, lab_loss]
 
     def calculate_accs(self, results):
@@ -190,7 +192,6 @@ class Poison_detect:
         nodes_acc = {}
         loss_dict = {}
         label_loss_dict = {}
-        # might need to fix other pool..
         pool = Pool(ray_address="auto")
         evaluated = pool.map(self.par_results_ev, results)
         for elem in evaluated:
@@ -206,7 +207,7 @@ class Poison_detect:
     @staticmethod
     def get_eval_fn(model, x_test,y_test):
         """Return an evaluation function for server-side evaluation."""
-        def evaluate(weights: fl.common.NDArrays) -> Optional[Tuple[float, float]]:
+        def evaluate(weights) -> Optional[Tuple[float, float]]:
             model.set_weights(weights)
             preds = model.predict(x_test)
             spec_label_correct_count = [0.0 for i in range(len(y_test[0]))]

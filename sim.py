@@ -372,7 +372,7 @@ def main() -> None:
             dpstrat = DPFedAvgAdaptive(strategy=strat,
             num_sampled_clients=NUM_CLIENTS_PICK,
             server_side_noising=False,
-            init_clip_norm=50.0,
+            init_clip_norm=5.0,
             noise_multiplier=0.0005,
             clip_norm_target_quantile=0.5,
             )
